@@ -12,10 +12,10 @@ conda activate llm-verifier
 pip install torch==2.9.0 torchvision==0.24.0 torchaudio==2.9.0
 ```
 
-### Using pip
+<!-- ### Using pip
 
 ```bash
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirement.txt
-```
+``` -->
