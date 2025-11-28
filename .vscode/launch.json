@@ -1,0 +1,20 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Fully Finetune",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "scripts/finetune_full_verifier.py",
+            "args": [
+                "--data_path", "data/verifier_dataset_train.json",
+                "--val_split", "0.1",
+                "--eval_every", "1",
+                "--seed", "42"],
+            "console": "integratedTerminal"
+        }
+    ]
+}

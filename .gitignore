@@ -1,0 +1,10 @@
+**/verifier_dataset_train.json
+**/outputs/
+**/output/
+**/llm_verifier.egg-info/
+**/finetuned_verifier/
+**/logs/
+**/checkpoints/
+**/__pycache__/
+*.pyc
+**/.DS_Store

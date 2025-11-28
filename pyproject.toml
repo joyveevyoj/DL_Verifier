@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm_verifier"
+version = "0.1.0"
+description = "A verifier module for LLM math answers"
+authors = [
+  { name = "Feng Tian", email = "fetian@ethz.ch" },
+]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "torch",
+    "transformers",
+    "numpy",
+    "tqdm"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -10,6 +10,7 @@ Test-time scaling experiment for LLM verification using Qwen3-0.6B on GSM8K data
 conda env create -f environment.yml
 conda activate llm-verifier
 pip install torch==2.9.0 torchvision==0.24.0 torchaudio==2.9.0
+pip install -e .
 ```
 
 <!-- ### Using pip
@@ -26,4 +27,10 @@ pip install -r requirement.txt
 
 ```bash
 unzip data/verifier_dataset_train.zip -d data/
+```
+
+### Start Finetuning
+
+```bash
+python scripts/finetune_full_verifier.py
 ```
