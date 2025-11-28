@@ -19,3 +19,11 @@ python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirement.txt
 ``` -->
+
+## Finetune
+
+### Unzip Training Data
+
+```bash
+unzip verifier_dataset_train.zip -d ./data
+```
