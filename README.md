@@ -25,5 +25,5 @@ pip install -r requirement.txt
 ### Unzip Training Data
 
 ```bash
-unzip verifier_dataset_train.zip -d ./data
+unzip data/verifier_dataset_train.zip -d data/
 ```
