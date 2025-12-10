@@ -12,7 +12,9 @@ matplotlib>=3.8.0
 numpy>=1.26.0
 pandas>=2.2.0
 tqdm
+tensorboard
 sentencepiece
 safetensors
 jupyterlab
 ipykernel
+hf_transfer-0.1.9

@@ -170,6 +170,94 @@ def save_verifier_dataset(output_path, questions, generated_answers, reference_a
     print(f"\nSaved verifier dataset with {len(records)} records to {output_path}")
 
 
+# def main():
+#     # Load the tokenizer and the model
+#     model_name = "Qwen/Qwen3-0.6B"
+
+#     print("Loading tokenizer and model...")
+#     tokenizer = AutoTokenizer.from_pretrained(model_name)
+#     model = AutoModelForCausalLM.from_pretrained(
+#         model_name,
+#         torch_dtype="auto",
+#         device_map="auto"
+#     )
+
+#     # Load GSM8K dataset
+#     print("Loading GSM8K dataset...")
+#     ds = load_dataset("openai/gsm8k", "main")
+
+#     print(f"Dataset loaded: {len(ds['test'])} test examples, {len(ds['train'])} train examples")
+#     print(f"Model loaded on device: {model.device}")
+#     num_questions = 1
+#     num_answers = 32
+
+#     test_examples = [ds['test'][i] for i in range(num_questions)]
+#     # Keep the first example for downstream cells that expect `test_example`
+#     test_example = test_examples[0]
+#     questions = [example['question'] for example in test_examples]
+#     reference_answers = [example['answer'] for example in test_examples]
+#     reference_final = [extract_answer(ans) for ans in reference_answers]
+
+#     for idx, example in enumerate(test_examples):
+#         print(f"Question {idx + 1}: {example['question']}")
+#         print(f"\nReference Answer: {example['answer']}")
+#         print(f"Reference Final Answer: {reference_final[idx]}")
+#         print("\n" + "-"*80)
+
+#     print("="*80)
+#     print(f"Generating {num_answers} answers for each of {num_questions} questions...")
+#     print("="*80)
+
+#     # Time the generation process
+#     start_time = time.time()
+#     generated_answers = generate_answers(
+#         questions,
+#         tokenizer,
+#         model,
+#         num_answers=num_answers,
+#         correct_answer=reference_answers
+#     )
+#     end_time = time.time()
+
+#     # Calculate and print timing statistics
+#     total_time = end_time - start_time
+#     total_generations = num_questions * num_answers
+#     avg_time_per_answer = total_time / total_generations
+
+#     print("\n" + "="*80)
+#     print("TIMING STATISTICS:")
+#     print("="*80)
+#     print(f"Total time for {total_generations} answers: {total_time:.2f} seconds")
+#     print(f"Average time per answer: {avg_time_per_answer:.2f} seconds")
+
+#     print("\n" + "="*80)
+#     print("VERIFICATION RESULTS:")
+#     print("="*80)
+
+#     total_correct = 0
+#     for q_idx, (example, answers) in enumerate(zip(test_examples, generated_answers)):
+#         print(f"\nQuestion {q_idx + 1} Results:")
+#         question_correct = 0
+#         for a_idx, answer in enumerate(answers):
+#             extracted = extract_answer(answer)
+#             is_correct = check_answer_correct(answer, example['answer'])
+#             # print(f"\nAnswer {a_idx + 1}:")
+#             # print(f"Extracted value: {extracted}")
+#             # print(f"Correct: {is_correct}")
+#             # print(f"Response preview: {answer}...")
+#             if is_correct:
+#                 question_correct += 1
+#                 total_correct += 1
+#         print(f"\nSummary for Question {q_idx + 1}: {question_correct}/{num_answers} answers were correct")
+
+#     print("\n" + "="*80)
+#     print(f"Overall: {total_correct}/{total_generations} answers were correct across all questions")
+
+#     # Persist verifier dataset
+#     output_path = "verifier_dataset.json"
+#     save_verifier_dataset(output_path, questions, generated_answers, reference_answers)
+
+
 def main():
     # Load the tokenizer and the model
     model_name = "Qwen/Qwen3-0.6B"
@@ -188,75 +276,79 @@ def main():
 
     print(f"Dataset loaded: {len(ds['test'])} test examples, {len(ds['train'])} train examples")
     print(f"Model loaded on device: {model.device}")
-    num_questions = 1
+    
+    # Configuration
+    num_questions = 5
     num_answers = 32
+    num_runs = 5
 
+    # Get first 5 questions from test set
     test_examples = [ds['test'][i] for i in range(num_questions)]
-    # Keep the first example for downstream cells that expect `test_example`
-    test_example = test_examples[0]
     questions = [example['question'] for example in test_examples]
     reference_answers = [example['answer'] for example in test_examples]
-    reference_final = [extract_answer(ans) for ans in reference_answers]
-
-    for idx, example in enumerate(test_examples):
-        print(f"Question {idx + 1}: {example['question']}")
-        print(f"\nReference Answer: {example['answer']}")
-        print(f"Reference Final Answer: {reference_final[idx]}")
-        print("\n" + "-"*80)
-
-    print("="*80)
-    print(f"Generating {num_answers} answers for each of {num_questions} questions...")
-    print("="*80)
-
-    # Time the generation process
-    start_time = time.time()
-    generated_answers = generate_answers(
-        questions,
-        tokenizer,
-        model,
-        num_answers=num_answers,
-        correct_answer=reference_answers
-    )
-    end_time = time.time()
-
-    # Calculate and print timing statistics
-    total_time = end_time - start_time
-    total_generations = num_questions * num_answers
-    avg_time_per_answer = total_time / total_generations
 
     print("\n" + "="*80)
-    print("TIMING STATISTICS:")
-    print("="*80)
-    print(f"Total time for {total_generations} answers: {total_time:.2f} seconds")
-    print(f"Average time per answer: {avg_time_per_answer:.2f} seconds")
-
-    print("\n" + "="*80)
-    print("VERIFICATION RESULTS:")
+    print(f"Running {num_runs} runs:")
+    print(f"  - {num_questions} questions per run")
+    print(f"  - {num_answers} answers per question")
+    print(f"  - Total: {num_questions * num_answers} generations per run")
     print("="*80)
 
-    total_correct = 0
-    for q_idx, (example, answers) in enumerate(zip(test_examples, generated_answers)):
-        print(f"\nQuestion {q_idx + 1} Results:")
-        question_correct = 0
-        for a_idx, answer in enumerate(answers):
-            extracted = extract_answer(answer)
-            is_correct = check_answer_correct(answer, example['answer'])
-            # print(f"\nAnswer {a_idx + 1}:")
-            # print(f"Extracted value: {extracted}")
-            # print(f"Correct: {is_correct}")
-            # print(f"Response preview: {answer}...")
-            if is_correct:
-                question_correct += 1
-                total_correct += 1
-        print(f"\nSummary for Question {q_idx + 1}: {question_correct}/{num_answers} answers were correct")
+    # Run 5 times
+    run_results = []
+    for run_idx in range(num_runs):
+        print(f"\n{'='*80}")
+        print(f"RUN {run_idx + 1}/{num_runs}")
+        print('='*80)
+        
+        # Generate answers for all 5 questions
+        start_time = time.time()
+        generated_answers = generate_answers(
+            questions,
+            tokenizer,
+            model,
+            num_answers=num_answers,
+            correct_answer=reference_answers
+        )
+        end_time = time.time()
+        
+        # Calculate correct rate for this run
+        total_correct = 0
+        total_generated = num_questions * num_answers
+        
+        for q_idx, (example, answers) in enumerate(zip(test_examples, generated_answers)):
+            question_correct = 0
+            for answer in answers:
+                is_correct = check_answer_correct(answer, example['answer'])
+                if is_correct:
+                    question_correct += 1
+                    total_correct += 1
+        
+        correct_rate = total_correct / total_generated if total_generated > 0 else 0.0
+        run_results.append({
+            'run': run_idx + 1,
+            'correct': total_correct,
+            'total': total_generated,
+            'rate': correct_rate,
+            'time': end_time - start_time
+        })
+        
+        print(f"\nRun {run_idx + 1} Results:")
+        print(f"  Correct: {total_correct}/{total_generated}")
+        print(f"  Correct Rate: {correct_rate:.4f} ({correct_rate*100:.2f}%)")
+        print(f"  Time: {end_time - start_time:.2f} seconds")
 
+    # Print summary
     print("\n" + "="*80)
-    print(f"Overall: {total_correct}/{total_generations} answers were correct across all questions")
-
-    # Persist verifier dataset
-    output_path = "verifier_dataset.json"
-    save_verifier_dataset(output_path, questions, generated_answers, reference_answers)
-
+    print("SUMMARY OF ALL RUNS")
+    print("="*80)
+    for result in run_results:
+        print(f"Run {result['run']}: {result['correct']}/{result['total']} = {result['rate']:.4f} ({result['rate']*100:.2f}%)")
+    
+    # Calculate average correct rate
+    avg_rate = sum(r['rate'] for r in run_results) / len(run_results)
+    print(f"\nAverage Correct Rate across {num_runs} runs: {avg_rate:.4f} ({avg_rate*100:.2f}%)")
+    print("="*80)
 
 
 if __name__ == "__main__":
