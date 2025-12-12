@@ -1,10 +1,50 @@
-**/verifier_dataset_train.json
-**/outputs/
-**/output/
-**/llm_verifier.egg-info/
-**/finetuned_verifier/
-**/logs/
-**/checkpoints/
-**/__pycache__/
-*.pyc
-**/.DS_Store
+# Ignore large training dataset (keep test set and zip)
+data/verifier_dataset_train.json
+
+# Ignore all checkpoint files
+*.ckpt
+*.pth
+*.pt
+checkpoint*
+checkpoints/
+*checkpoint*
+models/
+saved_models/
+outputs/
+runs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+*.egg-info/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp

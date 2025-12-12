@@ -18,5 +18,6 @@ dependencies:
       - tqdm
       - jupyterlab
       - ipykernel
+      - tensorboard
       - sentencepiece  # sometimes required by tokenizer
       - safetensors    # faster model loading
