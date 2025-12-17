@@ -12,7 +12,7 @@ models/
 saved_models/
 outputs/
 runs/
-verfier_lora/
+verifier_lora/
 verifier_pauc/
 # Python
 __pycache__/
