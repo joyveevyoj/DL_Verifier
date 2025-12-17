@@ -17,5 +17,5 @@ sentencepiece
 safetensors
 jupyterlab
 ipykernel
-hf_transfer-0.1.9
+hf_transfer
 libauc
