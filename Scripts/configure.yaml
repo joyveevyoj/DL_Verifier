@@ -1,0 +1,46 @@
+# Model Configuration
+MODEL_NAME: "Qwen/Qwen3-0.6B"
+
+# Dataset Paths
+# Use relative path from project root
+TRAIN_DATASET_PATH: "data/verifier_dataset_train.json"
+
+# Device Configuration
+# Options: "cuda", "cpu", "mps" (for Apple Silicon)
+# If set to "auto", will automatically detect available device
+DEVICE: "auto"
+P_AUC_MAX_FPR: 0.3
+# BCE Training Configuration
+BCE_TRAIN:
+  BATCH_SIZE: 2
+  GRAD_ACCUMULATION_STEPS: 16
+  EPOCH_NUM: 5
+  LEARNING_RATE: 0.001  # 1e-3
+  MAX_LENGTH: 256
+  DEBUG_SAMPLE_SIZE: 30  # Set to null for full dataset
+  OUTPUT_DIR: "./verifier_lora"  # Directory to save model checkpoints
+  CHECKPOINT_PATH: "./checkpoints/training_state.pt"  # Path to save training state
+  LORA_R: 8
+  LORA_ALPHA: 32
+  LORA_DROPOUT: 0.1
+  START_FROM_CHECKPOINT: null
+
+
+# pAUC Training Configuration
+PAUC_TRAIN:
+  BATCH_SIZE: 2
+  GRAD_ACCUMULATION_STEPS: 16
+  EPOCH_NUM: 5
+  LEARNING_RATE: 0.001  # 1e-3
+  MAX_LENGTH: 256
+  DEBUG_SAMPLE_SIZE: 30  # Set to null for full dataset
+  OUTPUT_DIR: "./verifier_pauc"  # Directory to save pAUC checkpoints
+  CHECKPOINT_PATH: "./checkpoints/pauc_training_state.pt"
+  MARGIN: 0.2
+  GAMMA: 1.0
+  # NOTE: use an explicit float so YAML always parses it as numeric (not a string)
+  WEIGHT_DECAY: 2.0e-4
+  LORA_R: 8
+  LORA_ALPHA: 32
+  LORA_DROPOUT: 0.1
+  START_FROM_CHECKPOINT: null
