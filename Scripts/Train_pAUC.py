@@ -73,7 +73,7 @@ def train_pAUC(config, raw_questions):
     collator = _make_collator_with_index(tokenizer)
     # DualSampler ensures each batch has positives (1) and negatives (0).
     train_labels = [s["label"] for s in train_dataset.samples]
-    sampler = DualSampler(train_dataset, batch_size=config.PAUC_TRAIN.BATCH_SIZE, labels=train_labels, sampling_rate=0.5)
+    sampler = DualSampler(train_dataset, batch_size=config.PAUC_TRAIN.BATCH_SIZE, labels=train_labels, sampling_rate=config.PAUC_TRAIN.SAMPLING_RATE)
     train_loader = DataLoader(train_dataset, batch_size=config.PAUC_TRAIN.BATCH_SIZE, sampler=sampler, shuffle=False, collate_fn=collator, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=config.PAUC_TRAIN.BATCH_SIZE, shuffle=False, collate_fn=collator, pin_memory=True)
     num_training_steps = len(train_loader) * config.PAUC_TRAIN.EPOCH_NUM // config.PAUC_TRAIN.GRAD_ACCUMULATION_STEPS
