@@ -25,6 +25,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+*.egg-info/
 
 # Jupyter Notebook
 .ipynb_checkpoints
