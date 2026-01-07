@@ -3,10 +3,10 @@ import os
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from tqdm import tqdm
-from Verifier_dataset import VerifierDataset
-from Lora_model import build_bce_model
+from verifier_dataset import VerifierDataset
+from lora_model import build_bce_model
 from transformers import (
-    AutoTokenizer, 
+    AutoTokenizer,
     get_linear_schedule_with_warmup,
     DataCollatorWithPadding
 )
@@ -55,14 +55,14 @@ def train_pAUC(config, raw_questions):
     tokenizer = AutoTokenizer.from_pretrained(config.MODEL_NAME)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    
+
     if config.PAUC_TRAIN.DEBUG_SAMPLE_SIZE:
         raw_questions = raw_questions[:config.PAUC_TRAIN.DEBUG_SAMPLE_SIZE]
-    
+
     random.seed(42)
     random.shuffle(raw_questions)
     split_idx = int(0.9 * len(raw_questions))
-    if split_idx == 0 and len(raw_questions) > 0: 
+    if split_idx == 0 and len(raw_questions) > 0:
         split_idx = 1
     train_questions = raw_questions[:split_idx]
     val_questions = raw_questions[split_idx:]
@@ -77,7 +77,7 @@ def train_pAUC(config, raw_questions):
     train_loader = DataLoader(train_dataset, batch_size=config.PAUC_TRAIN.BATCH_SIZE, sampler=sampler, shuffle=False, collate_fn=collator, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=config.PAUC_TRAIN.BATCH_SIZE, shuffle=False, collate_fn=collator, pin_memory=True)
     num_training_steps = len(train_loader) * config.PAUC_TRAIN.EPOCH_NUM // config.PAUC_TRAIN.GRAD_ACCUMULATION_STEPS
-    
+
     # Build model with LoRA configuration
     model = build_bce_model(
         model_name=config.MODEL_NAME,
@@ -104,36 +104,36 @@ def train_pAUC(config, raw_questions):
         model.train()
         total_loss = 0
         optimizer.zero_grad()
-        
+
         progress_bar = tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Epoch {epoch+1}/{config.PAUC_TRAIN.EPOCH_NUM}")
-        
+
         for step, batch in progress_bar:
             batch = {k: v.to(config.DEVICE) for k, v in batch.items()}
-            
+
             outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
-            
-            logits = outputs.logits.squeeze(-1) 
+
+            logits = outputs.logits.squeeze(-1)
             y_prob = torch.sigmoid(logits)
             loss = loss_fn(y_prob, batch['labels'], batch['index'])
             loss = loss / config.PAUC_TRAIN.GRAD_ACCUMULATION_STEPS
-            
+
             loss.backward()
-            
+
             if (step + 1) % config.PAUC_TRAIN.GRAD_ACCUMULATION_STEPS == 0:
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
-            
+
             current_loss = loss.item() * config.PAUC_TRAIN.GRAD_ACCUMULATION_STEPS
             total_loss += current_loss
             progress_bar.set_postfix({'loss': current_loss})
-            
+
         avg_train_loss = total_loss / len(train_loader)
-        
+
         model.eval()
         val_pred_list = []
         val_true_list = []
-        
+
         print(f"Validating Epoch {epoch+1}...")
         with torch.no_grad():
             for batch in val_loader:
