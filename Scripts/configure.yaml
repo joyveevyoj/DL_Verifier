@@ -4,6 +4,7 @@ MODEL_NAME: "Qwen/Qwen3-0.6B"
 # Dataset Paths
 # Use relative path from project root
 TRAIN_DATASET_PATH: "data/verifier_dataset_train.json"
+TEST_DATASET_PATH: "data/verifier_dataset_test.json"
 
 # Device Configuration
 # Options: "cuda", "cpu", "mps" (for Apple Silicon)
