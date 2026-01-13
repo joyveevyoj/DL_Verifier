@@ -4,7 +4,7 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from tqdm import tqdm
-from tqdm import tqdm
+from accelerate import Accelerator
 from verifier_dataset import VerifierDataset
 from lora_model import build_bce_model
 from transformers import (
@@ -14,16 +14,22 @@ from transformers import (
 )
 from libauc.metrics import auc_roc_score
 import random
+from datetime import datetime
 
 
-def _load_checkpoint(path, model, optimizer, scheduler):
-    checkpoint = torch.load(path, map_location=model.device)
-    model.load_state_dict(checkpoint['model_state_dict'])
+def _load_checkpoint(path, model, optimizer, scheduler, accelerator):
+    # Load to the correct device managed by accelerator
+    checkpoint = torch.load(path, map_location=accelerator.device)
+    unwrapped_model = accelerator.unwrap_model(model)
+    unwrapped_model.load_state_dict(checkpoint['model_state_dict'])
+    # Load optimizer and scheduler states
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
     start_epoch = checkpoint.get('epoch', -1) + 1
     best_val_acc = checkpoint.get('best_val_acc', 0.0)
-    print(f"Resuming BCE training from {path} (starting epoch {start_epoch}, best val {best_val_acc:.4f})")
+    # Only print on the main process to avoid clutter
+    if accelerator.is_local_main_process:
+        print(f"Resuming training from {path} (starting epoch {start_epoch}, best val acc {best_val_acc:.4f})")
     return start_epoch, best_val_acc
 
 
@@ -31,7 +37,21 @@ def _ensure_parent_dir(path: str):
     parent = os.path.dirname(path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-def train_bce(config, raw_questions):
+
+
+def train_bce(config, raw_questions, mode="bce"):
+    accelerator = Accelerator(
+        log_with="wandb",
+        gradient_accumulation_steps=config.BCE_TRAIN.GRAD_ACCUMULATION_STEPS
+    )
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = f"{mode}_{timestamp}"
+    accelerator.init_trackers(
+        project_name="llm-verifier",
+        config=vars(config.BCE_TRAIN),
+        init_kwargs={"wandb": {"name": run_name}}
+    )
+
     tokenizer = AutoTokenizer.from_pretrained(config.MODEL_NAME)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -64,92 +84,125 @@ def train_bce(config, raw_questions):
         pad_token_id=tokenizer.pad_token_id,
         config=config
     )
-    model = model.to(config.DEVICE)
+    # model = model.to(config.DEVICE)
 
     optimizer = AdamW(model.parameters(), lr=config.BCE_TRAIN.LEARNING_RATE)
     criterion = torch.nn.BCEWithLogitsLoss()
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)
+    
+    model, optimizer, train_loader, val_loader, scheduler = accelerator.prepare(
+        model, optimizer, train_loader, val_loader, scheduler
+    )
+
     best_val_acc = 0.0
     run_start_epoch = 0
+
     if config.BCE_TRAIN.START_FROM_CHECKPOINT:
         run_start_epoch, best_val_acc = _load_checkpoint(
             config.BCE_TRAIN.START_FROM_CHECKPOINT,
             model,
             optimizer,
             scheduler,
+            accelerator
         )
+
     for epoch in range(run_start_epoch, config.BCE_TRAIN.EPOCH_NUM):
         model.train()
         total_loss = 0
-        optimizer.zero_grad()
-
-        progress_bar = tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Epoch {epoch+1}/{config.BCE_TRAIN.EPOCH_NUM}")
+        
+        # Only show progress bar on the main process
+        progress_bar = tqdm(enumerate(train_loader), total=len(train_loader), 
+                            desc=f"Epoch {epoch+1}", disable=not accelerator.is_local_main_process)
 
         for step, batch in progress_bar:
-            batch = {k: v.to(config.DEVICE) for k, v in batch.items()}
+            # Context manager for gradient accumulation handles sync automatically
+            with accelerator.accumulate(model):
+                outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
+                logits = outputs.logits.squeeze(-1)
+                loss = criterion(logits, batch['labels'])
 
-            outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
-
-            logits = outputs.logits.squeeze(-1)
-
-            loss = criterion(logits, batch['labels'])
-            loss = loss / config.BCE_TRAIN.GRAD_ACCUMULATION_STEPS
-
-            loss.backward()
-
-            if (step + 1) % config.BCE_TRAIN.GRAD_ACCUMULATION_STEPS == 0:
+                # Use accelerator for backward pass
+                accelerator.backward(loss)
+                
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
 
-            current_loss = loss.item() * config.BCE_TRAIN.GRAD_ACCUMULATION_STEPS
-            total_loss += current_loss
-            progress_bar.set_postfix({'loss': current_loss})
+                current_loss = loss.item()
+                total_loss += current_loss
+                
+                # Log to WandB (step is handled automatically or can be explicit)
+                accelerator.log({"train/loss": current_loss, "train/lr": scheduler.get_last_lr()[0]})
+                progress_bar.set_postfix({'loss': current_loss})
 
         avg_train_loss = total_loss / len(train_loader)
 
+        # Validation Loop
         model.eval()
-        val_correct = 0
-        val_total = 0
         val_pred_list = []
         val_true_list = []
 
-        print(f"Validating Epoch {epoch+1}...")
+        if accelerator.is_local_main_process:
+            print(f"Validating Epoch {epoch+1}...")
+
         with torch.no_grad():
             for batch in val_loader:
-                batch = {k: v.to(config.DEVICE) for k, v in batch.items()}
-
                 outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
                 logits = outputs.logits.squeeze(-1)
-
                 probs = torch.sigmoid(logits)
-                predictions = (probs > 0.5).float()
-                # numpy doesn't support bfloat16; cast to float32 first
-                val_pred_list.append(probs.detach().float().cpu().numpy())
-                val_true_list.append(batch['labels'].cpu().numpy())
-                val_correct += (predictions == batch['labels']).sum().item()
-                val_total += len(batch['labels'])
-        if len(val_true_list) > 0:
-            val_pred = np.concatenate(val_pred_list)
-            val_true = np.concatenate(val_true_list)
-            val_pauc = auc_roc_score(val_true, val_pred, max_fpr=config.P_AUC_MAX_FPR)
-        else:
-            val_pauc = 0.0
+                
+                # 4. GATHER PREDICTIONS FROM ALL GPUS
+                # This ensures metrics are calculated on the full dataset
+                probs, labels = accelerator.gather_for_metrics((probs, batch['labels']))
+                
+                val_pred_list.append(probs.detach().cpu().float().numpy())
+                val_true_list.append(labels.cpu().numpy())
 
-        val_acc = val_correct / val_total if val_total > 0 else 0
-        print(f"Epoch {epoch+1} Finished | Train Loss: {avg_train_loss:.4f} | Val Acc: {val_acc:.2%} | Val pAUC: {val_pauc:.4f}")
-        if val_acc >= best_val_acc:
-            best_val_acc = val_acc
-            print("New best model found. Saving checkpoint...")
-            os.makedirs(config.BCE_TRAIN.OUTPUT_DIR, exist_ok=True)
-            _ensure_parent_dir(config.BCE_TRAIN.CHECKPOINT_PATH)
-            model.save_pretrained(config.BCE_TRAIN.OUTPUT_DIR)
-            tokenizer.save_pretrained(config.BCE_TRAIN.OUTPUT_DIR)
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'best_val_acc': best_val_acc,
-            }, config.BCE_TRAIN.CHECKPOINT_PATH)
-            print(f"Checkpoint Saved (best so far at epoch {epoch+1}).\n")
+        # Metrics calculation (only on main process)
+        if accelerator.is_main_process:
+            if len(val_true_list) > 0:
+                val_pred = np.concatenate(val_pred_list)
+                val_true = np.concatenate(val_true_list)
+                
+                predictions = (val_pred > 0.5).astype(float)
+                val_correct = (predictions == val_true).sum()
+                val_total = len(val_true)
+                val_acc = val_correct / val_total
+                
+                try:
+                    val_pauc = auc_roc_score(val_true, val_pred, max_fpr=config.P_AUC_MAX_FPR)
+                except:
+                    val_pauc = 0.0
+            else:
+                val_acc = 0.0
+                val_pauc = 0.0
+
+            print(f"Epoch {epoch+1} Finished | Train Loss: {avg_train_loss:.4f} | Val Acc: {val_acc:.2%} | Val pAUC: {val_pauc:.4f}")
+            
+            # Log Validation Metrics
+            global_step = (epoch + 1) * len(train_loader)
+            accelerator.log({
+                "val/acc": val_acc, 
+                "val/pauc": val_pauc, 
+                "epoch": epoch + 1
+            }, step=global_step)
+
+            if val_acc >= best_val_acc:
+                best_val_acc = val_acc
+                print("New best model found. Saving checkpoint...")
+                os.makedirs(config.BCE_TRAIN.OUTPUT_DIR, exist_ok=True)
+                _ensure_parent_dir(config.BCE_TRAIN.CHECKPOINT_PATH)
+                # Unwrap model before saving to remove DDP wrapper
+                unwrapped_model = accelerator.unwrap_model(model)
+                unwrapped_model.save_pretrained(config.BCE_TRAIN.OUTPUT_DIR)
+                tokenizer.save_pretrained(config.BCE_TRAIN.OUTPUT_DIR)
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': unwrapped_model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict(),
+                    'best_val_acc': best_val_acc,
+                }, config.BCE_TRAIN.CHECKPOINT_PATH)
+                print(f"Checkpoint Saved to {config.BCE_TRAIN.CHECKPOINT_PATH} (best so far at epoch {epoch+1}).\n")
+    
+    accelerator.end_training()

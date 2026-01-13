@@ -3,6 +3,7 @@ import os
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from tqdm import tqdm
+from accelerate import Accelerator
 from verifier_dataset import VerifierDataset
 from lora_model import build_bce_model
 from transformers import (
@@ -16,17 +17,23 @@ from libauc.losses import pAUCLoss
 from libauc.optimizers import SOPAs
 from libauc.sampler import DualSampler
 from libauc.metrics import auc_roc_score
+from datetime import datetime
 
 
-def _load_checkpoint(path, model, optimizer, scheduler):
-    checkpoint = torch.load(path, map_location=model.device)
-    model.load_state_dict(checkpoint['model_state_dict'])
+def _load_checkpoint(path, model, optimizer, scheduler, accelerator):
+    # Load to the correct device managed by accelerator
+    checkpoint = torch.load(path, map_location=accelerator.device)
+    unwrapped_model = accelerator.unwrap_model(model)
+    unwrapped_model.load_state_dict(checkpoint['model_state_dict'])
+    # Load optimizer and scheduler states
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
     start_epoch = checkpoint.get('epoch', -1) + 1
-    best_val = checkpoint.get('best_val_acc', 0.0)
-    print(f"Resuming pAUC training from {path} (starting epoch {start_epoch}, best val {best_val:.4f})")
-    return start_epoch, best_val
+    best_val_pauc = checkpoint.get('best_val_pauc', 0.0)
+    # Only print on the main process to avoid clutter
+    if accelerator.is_local_main_process:
+        print(f"Resuming training from {path} (starting epoch {start_epoch}, best val pauc {best_val_pauc:.4f})")
+    return start_epoch, best_val_pauc
 
 
 def _ensure_parent_dir(path: str):
@@ -51,7 +58,20 @@ def _make_collator_with_index(tokenizer):
 
     return collate
 
-def train_pAUC(config, raw_questions):
+
+def train_pAUC(config, raw_questions, mode="pauc"):
+    accelerator = Accelerator(
+        log_with="wandb",
+        gradient_accumulation_steps=config.PAUC_TRAIN.GRAD_ACCUMULATION_STEPS
+    )
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = f"{mode}_{timestamp}"
+    accelerator.init_trackers(
+        project_name="llm-verifier",
+        config=vars(config.PAUC_TRAIN) if hasattr(config.PAUC_TRAIN, '__dict__') else {},
+        init_kwargs={"wandb": {"name": run_name}}
+    )
+
     tokenizer = AutoTokenizer.from_pretrained(config.MODEL_NAME)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -87,80 +107,126 @@ def train_pAUC(config, raw_questions):
         pad_token_id=tokenizer.pad_token_id,
         config=config
     )
-    model = model.to(config.DEVICE)
+    # model = model.to(config.DEVICE)
+
     loss_fn = pAUCLoss('1w', data_len=len(train_dataset), margin=config.PAUC_TRAIN.MARGIN, gamma=config.PAUC_TRAIN.GAMMA)
     optimizer = SOPAs(model.parameters(), mode='adam', lr=config.PAUC_TRAIN.LEARNING_RATE, weight_decay=config.PAUC_TRAIN.WEIGHT_DECAY)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)
+
+    model, optimizer, train_loader, val_loader, scheduler = accelerator.prepare(
+        model, optimizer, train_loader, val_loader, scheduler
+    )
+
     run_start_epoch = 0
-    best_val_acc = 0.0
+    best_val_pauc = 0.0
+
     if config.PAUC_TRAIN.START_FROM_CHECKPOINT:
-        run_start_epoch, best_val_acc = _load_checkpoint(
+        run_start_epoch, best_val_pauc = _load_checkpoint(
             config.PAUC_TRAIN.START_FROM_CHECKPOINT,
             model,
             optimizer,
             scheduler,
+            accelerator
         )
+    
     for epoch in range(run_start_epoch, config.PAUC_TRAIN.EPOCH_NUM):
         model.train()
         total_loss = 0
-        optimizer.zero_grad()
-
-        progress_bar = tqdm(enumerate(train_loader), total=len(train_loader), desc=f"Epoch {epoch+1}/{config.PAUC_TRAIN.EPOCH_NUM}")
+        
+        progress_bar = tqdm(enumerate(train_loader), total=len(train_loader), 
+                            desc=f"Epoch {epoch+1}", disable=not accelerator.is_local_main_process)
 
         for step, batch in progress_bar:
-            batch = {k: v.to(config.DEVICE) for k, v in batch.items()}
+            # We skip accelerator.accumulate() context for LibAUC SOPAs because it manages its own updates often,
+            # but for standard gradient accumulation logic, we can use it if supported.
+            # Assuming standard accumulation logic applies to the backward pass:
+            with accelerator.accumulate(model):
+                outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
+                logits = outputs.logits.squeeze(-1)
+                y_prob = torch.sigmoid(logits)
+                
+                loss = loss_fn(y_prob, batch['labels'], batch['index'])
+                
+                # Replaced backward
+                accelerator.backward(loss)
 
-            outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
-
-            logits = outputs.logits.squeeze(-1)
-            y_prob = torch.sigmoid(logits)
-            loss = loss_fn(y_prob, batch['labels'], batch['index'])
-            loss = loss / config.PAUC_TRAIN.GRAD_ACCUMULATION_STEPS
-
-            loss.backward()
-
-            if (step + 1) % config.PAUC_TRAIN.GRAD_ACCUMULATION_STEPS == 0:
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
 
-            current_loss = loss.item() * config.PAUC_TRAIN.GRAD_ACCUMULATION_STEPS
-            total_loss += current_loss
-            progress_bar.set_postfix({'loss': current_loss})
+                current_loss = loss.item()
+                total_loss += current_loss
+                accelerator.log({"train/loss": current_loss})
+                progress_bar.set_postfix({'loss': current_loss})
 
         avg_train_loss = total_loss / len(train_loader)
 
+        # Validation Loop
         model.eval()
         val_pred_list = []
         val_true_list = []
 
-        print(f"Validating Epoch {epoch+1}...")
+        if accelerator.is_local_main_process:
+            print(f"Validating Epoch {epoch+1}...")
+
         with torch.no_grad():
             for batch in val_loader:
-                batch = {k: v.to(config.DEVICE) for k, v in batch.items()}
                 outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
                 logits = outputs.logits.squeeze(-1)
-                y_prob = torch.sigmoid(logits)
-                # numpy doesn't support bfloat16; cast to float32 first
-                val_pred_list.append(y_prob.detach().float().cpu().numpy())
-                val_true_list.append(batch['labels'].cpu().numpy())
+                probs = torch.sigmoid(logits)
+                
+                # Gather predictions
+                probs, labels = accelerator.gather_for_metrics((probs, batch['labels']))
 
-        val_pred = np.concatenate(val_pred_list)
-        val_true = np.concatenate(val_true_list)
-        val_pauc = auc_roc_score(val_true, val_pred, max_fpr=config.P_AUC_MAX_FPR)
-        print(f"Epoch {epoch+1} Finished | Train Loss: {avg_train_loss:.4f} | Val pAUC: {val_pauc:.4f}")
-        if val_pauc >= best_val_acc:
-            best_val_acc = val_pauc
-            print("New best model found. Saving checkpoint...")
-            os.makedirs(config.PAUC_TRAIN.OUTPUT_DIR, exist_ok=True)
-            _ensure_parent_dir(config.PAUC_TRAIN.CHECKPOINT_PATH)
-            model.save_pretrained(config.PAUC_TRAIN.OUTPUT_DIR)
-            tokenizer.save_pretrained(config.PAUC_TRAIN.OUTPUT_DIR)
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'best_val_acc': best_val_acc,
-            }, config.PAUC_TRAIN.CHECKPOINT_PATH)
-            print(f"Checkpoint Saved (best so far at epoch {epoch+1}).\n")
+                val_pred_list.append(probs.detach().cpu().float().numpy())
+                val_true_list.append(labels.cpu().numpy())
+
+        # Metrics calculation (only on main process)
+        if accelerator.is_main_process:
+            if len(val_true_list) > 0:
+                val_pred = np.concatenate(val_pred_list)
+                val_true = np.concatenate(val_true_list)
+                
+                predictions = (val_pred > 0.5).astype(float)
+                val_correct = (predictions == val_true).sum()
+                val_total = len(val_true)
+                val_acc = val_correct / val_total
+                
+                try:
+                    val_pauc = auc_roc_score(val_true, val_pred, max_fpr=config.P_AUC_MAX_FPR)
+                except:
+                    val_pauc = 0.0
+            else:
+                val_acc = 0.0
+                val_pauc = 0.0
+
+            print(f"Epoch {epoch+1} Finished | Train Loss: {avg_train_loss:.4f} | Val Acc: {val_acc:.2%} | Val pAUC: {val_pauc:.4f}")
+            
+            # Log Validation Metrics
+            global_step = (epoch + 1) * len(train_loader)
+            accelerator.log({
+                "val/acc": val_acc, 
+                "val/pauc": val_pauc, 
+                "epoch": epoch + 1
+            }, step=global_step)
+
+            if val_pauc >= best_val_pauc:
+                best_val_pauc = val_pauc
+                print(f"New best model found (pAUC: {best_val_pauc:.4f}). Saving checkpoint...")
+                os.makedirs(config.PAUC_TRAIN.OUTPUT_DIR, exist_ok=True)
+                
+                _ensure_parent_dir(config.PAUC_TRAIN.CHECKPOINT_PATH)
+                unwrapped_model = accelerator.unwrap_model(model)
+                unwrapped_model.save_pretrained(config.PAUC_TRAIN.OUTPUT_DIR)
+                tokenizer.save_pretrained(config.PAUC_TRAIN.OUTPUT_DIR)
+                
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': unwrapped_model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': scheduler.state_dict(),
+                    'best_val_pauc': best_val_pauc,
+                }, config.PAUC_TRAIN.CHECKPOINT_PATH)
+                print(f"Checkpoint Saved to {config.PAUC_TRAIN.CHECKPOINT_PATH} (best so far at epoch {epoch+1}).\n")
+
+    accelerator.end_training()

@@ -45,6 +45,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+wandb/
 
 # Temporary files
 *.tmp

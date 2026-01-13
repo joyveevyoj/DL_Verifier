@@ -74,9 +74,9 @@ def main():
         print(f"Using DEBUG mode: {bce_cfg.DEBUG_SAMPLE_SIZE} samples")
 
     if args.mode in ("bce", "both"):
-        train_bce(config, raw_questions)
+        train_bce(config, raw_questions, mode=args.mode)
     if args.mode in ("pauc", "both"):
-        train_pAUC(config, raw_questions)
+        train_pAUC(config, raw_questions, mode=args.mode)
 
 
 if __name__ == '__main__':
