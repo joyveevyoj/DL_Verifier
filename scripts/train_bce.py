@@ -49,7 +49,7 @@ def train_bce(config, raw_questions, mode="bce"):
     accelerator.init_trackers(
         project_name="llm-verifier",
         config=vars(config.BCE_TRAIN),
-        init_kwargs={"wandb": {"name": run_name}}
+        init_kwargs={"wandb": {"entity": "deeplearning-llm-verifier", "name": run_name}}
     )
 
     tokenizer = AutoTokenizer.from_pretrained(config.MODEL_NAME)
@@ -89,7 +89,7 @@ def train_bce(config, raw_questions, mode="bce"):
     optimizer = AdamW(model.parameters(), lr=config.BCE_TRAIN.LEARNING_RATE)
     criterion = torch.nn.BCEWithLogitsLoss()
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)
-    
+
     model, optimizer, train_loader, val_loader, scheduler = accelerator.prepare(
         model, optimizer, train_loader, val_loader, scheduler
     )
@@ -109,9 +109,9 @@ def train_bce(config, raw_questions, mode="bce"):
     for epoch in range(run_start_epoch, config.BCE_TRAIN.EPOCH_NUM):
         model.train()
         total_loss = 0
-        
+
         # Only show progress bar on the main process
-        progress_bar = tqdm(enumerate(train_loader), total=len(train_loader), 
+        progress_bar = tqdm(enumerate(train_loader), total=len(train_loader),
                             desc=f"Epoch {epoch+1}", disable=not accelerator.is_local_main_process)
 
         for step, batch in progress_bar:
@@ -123,14 +123,14 @@ def train_bce(config, raw_questions, mode="bce"):
 
                 # Use accelerator for backward pass
                 accelerator.backward(loss)
-                
+
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
 
                 current_loss = loss.item()
                 total_loss += current_loss
-                
+
                 # Log to WandB (step is handled automatically or can be explicit)
                 accelerator.log({"train/loss": current_loss, "train/lr": scheduler.get_last_lr()[0]})
                 progress_bar.set_postfix({'loss': current_loss})
@@ -150,11 +150,11 @@ def train_bce(config, raw_questions, mode="bce"):
                 outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
                 logits = outputs.logits.squeeze(-1)
                 probs = torch.sigmoid(logits)
-                
+
                 # 4. GATHER PREDICTIONS FROM ALL GPUS
                 # This ensures metrics are calculated on the full dataset
                 probs, labels = accelerator.gather_for_metrics((probs, batch['labels']))
-                
+
                 val_pred_list.append(probs.detach().cpu().float().numpy())
                 val_true_list.append(labels.cpu().numpy())
 
@@ -163,12 +163,12 @@ def train_bce(config, raw_questions, mode="bce"):
             if len(val_true_list) > 0:
                 val_pred = np.concatenate(val_pred_list)
                 val_true = np.concatenate(val_true_list)
-                
+
                 predictions = (val_pred > 0.5).astype(float)
                 val_correct = (predictions == val_true).sum()
                 val_total = len(val_true)
                 val_acc = val_correct / val_total
-                
+
                 try:
                     val_pauc = auc_roc_score(val_true, val_pred, max_fpr=config.P_AUC_MAX_FPR)
                 except:
@@ -178,12 +178,12 @@ def train_bce(config, raw_questions, mode="bce"):
                 val_pauc = 0.0
 
             print(f"Epoch {epoch+1} Finished | Train Loss: {avg_train_loss:.4f} | Val Acc: {val_acc:.2%} | Val pAUC: {val_pauc:.4f}")
-            
+
             # Log Validation Metrics
             global_step = (epoch + 1) * len(train_loader)
             accelerator.log({
-                "val/acc": val_acc, 
-                "val/pauc": val_pauc, 
+                "val/acc": val_acc,
+                "val/pauc": val_pauc,
                 "epoch": epoch + 1
             }, step=global_step)
 
@@ -191,18 +191,21 @@ def train_bce(config, raw_questions, mode="bce"):
                 best_val_acc = val_acc
                 print("New best model found. Saving checkpoint...")
                 os.makedirs(config.BCE_TRAIN.OUTPUT_DIR, exist_ok=True)
-                _ensure_parent_dir(config.BCE_TRAIN.CHECKPOINT_PATH)
+
+                checkpoint_path = os.path.join(config.BCE_TRAIN.CHECKPOINT_DIR, f"best_model_epoch_{epoch+1}.pt")
+                _ensure_parent_dir(checkpoint_path)
                 # Unwrap model before saving to remove DDP wrapper
                 unwrapped_model = accelerator.unwrap_model(model)
                 unwrapped_model.save_pretrained(config.BCE_TRAIN.OUTPUT_DIR)
                 tokenizer.save_pretrained(config.BCE_TRAIN.OUTPUT_DIR)
+
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': unwrapped_model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'scheduler_state_dict': scheduler.state_dict(),
                     'best_val_acc': best_val_acc,
-                }, config.BCE_TRAIN.CHECKPOINT_PATH)
-                print(f"Checkpoint Saved to {config.BCE_TRAIN.CHECKPOINT_PATH} (best so far at epoch {epoch+1}).\n")
-    
+                }, checkpoint_path)
+                print(f"Checkpoint Saved to {checkpoint_path} (best so far at epoch {epoch+1}).\n")
+
     accelerator.end_training()

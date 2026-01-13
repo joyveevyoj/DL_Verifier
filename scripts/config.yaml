@@ -19,8 +19,8 @@ BCE_TRAIN:
   LEARNING_RATE: 0.0002  # 2e-4
   MAX_LENGTH: 256
   DEBUG_SAMPLE_SIZE: null  # Set to null for full dataset
-  OUTPUT_DIR: "./verifier_lora"  # Directory to save model checkpoints
-  CHECKPOINT_PATH: "./checkpoints/training_state.pt"  # Path to save training state
+  OUTPUT_DIR: "./outputs/bce"  # Directory to save model checkpoints
+  CHECKPOINT_DIR: "./outputs/bce"  # Path to save training state
   LORA_R: 8
   LORA_ALPHA: 16
   LORA_DROPOUT: 0.1
@@ -35,8 +35,8 @@ PAUC_TRAIN:
   LEARNING_RATE: 0.0002  # 2e-4
   MAX_LENGTH: 256
   DEBUG_SAMPLE_SIZE: null  # Set to null for full dataset
-  OUTPUT_DIR: "./verifier_pauc"  # Directory to save pAUC checkpoints
-  CHECKPOINT_PATH: "./checkpoints/pauc_training_state.pt"
+  OUTPUT_DIR: "./outputs/pauc"  # Directory to save pAUC checkpoints
+  CHECKPOINT_DIR: "./outputs/pauc"
   MARGIN: 0.2
   GAMMA: 1.0
   # NOTE: use an explicit float so YAML always parses it as numeric (not a string)

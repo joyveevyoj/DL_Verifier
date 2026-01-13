@@ -69,7 +69,7 @@ def train_pAUC(config, raw_questions, mode="pauc"):
     accelerator.init_trackers(
         project_name="llm-verifier",
         config=vars(config.PAUC_TRAIN) if hasattr(config.PAUC_TRAIN, '__dict__') else {},
-        init_kwargs={"wandb": {"name": run_name}}
+        init_kwargs={"wandb": {"entity": "deeplearning-llm-verifier", "name": run_name}}
     )
 
     tokenizer = AutoTokenizer.from_pretrained(config.MODEL_NAME)
@@ -128,12 +128,12 @@ def train_pAUC(config, raw_questions, mode="pauc"):
             scheduler,
             accelerator
         )
-    
+
     for epoch in range(run_start_epoch, config.PAUC_TRAIN.EPOCH_NUM):
         model.train()
         total_loss = 0
-        
-        progress_bar = tqdm(enumerate(train_loader), total=len(train_loader), 
+
+        progress_bar = tqdm(enumerate(train_loader), total=len(train_loader),
                             desc=f"Epoch {epoch+1}", disable=not accelerator.is_local_main_process)
 
         for step, batch in progress_bar:
@@ -144,9 +144,9 @@ def train_pAUC(config, raw_questions, mode="pauc"):
                 outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
                 logits = outputs.logits.squeeze(-1)
                 y_prob = torch.sigmoid(logits)
-                
+
                 loss = loss_fn(y_prob, batch['labels'], batch['index'])
-                
+
                 # Replaced backward
                 accelerator.backward(loss)
 
@@ -174,7 +174,7 @@ def train_pAUC(config, raw_questions, mode="pauc"):
                 outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
                 logits = outputs.logits.squeeze(-1)
                 probs = torch.sigmoid(logits)
-                
+
                 # Gather predictions
                 probs, labels = accelerator.gather_for_metrics((probs, batch['labels']))
 
@@ -186,12 +186,12 @@ def train_pAUC(config, raw_questions, mode="pauc"):
             if len(val_true_list) > 0:
                 val_pred = np.concatenate(val_pred_list)
                 val_true = np.concatenate(val_true_list)
-                
+
                 predictions = (val_pred > 0.5).astype(float)
                 val_correct = (predictions == val_true).sum()
                 val_total = len(val_true)
                 val_acc = val_correct / val_total
-                
+
                 try:
                     val_pauc = auc_roc_score(val_true, val_pred, max_fpr=config.P_AUC_MAX_FPR)
                 except:
@@ -201,12 +201,12 @@ def train_pAUC(config, raw_questions, mode="pauc"):
                 val_pauc = 0.0
 
             print(f"Epoch {epoch+1} Finished | Train Loss: {avg_train_loss:.4f} | Val Acc: {val_acc:.2%} | Val pAUC: {val_pauc:.4f}")
-            
+
             # Log Validation Metrics
             global_step = (epoch + 1) * len(train_loader)
             accelerator.log({
-                "val/acc": val_acc, 
-                "val/pauc": val_pauc, 
+                "val/acc": val_acc,
+                "val/pauc": val_pauc,
                 "epoch": epoch + 1
             }, step=global_step)
 
@@ -214,19 +214,20 @@ def train_pAUC(config, raw_questions, mode="pauc"):
                 best_val_pauc = val_pauc
                 print(f"New best model found (pAUC: {best_val_pauc:.4f}). Saving checkpoint...")
                 os.makedirs(config.PAUC_TRAIN.OUTPUT_DIR, exist_ok=True)
-                
-                _ensure_parent_dir(config.PAUC_TRAIN.CHECKPOINT_PATH)
+
+                checkpoint_path = os.path.join(config.PAUC_TRAIN.CHECKPOINT_DIR, f"best_model_epoch_{epoch+1}.pt")
+                _ensure_parent_dir(checkpoint_path)
                 unwrapped_model = accelerator.unwrap_model(model)
                 unwrapped_model.save_pretrained(config.PAUC_TRAIN.OUTPUT_DIR)
                 tokenizer.save_pretrained(config.PAUC_TRAIN.OUTPUT_DIR)
-                
+
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': unwrapped_model.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'scheduler_state_dict': scheduler.state_dict(),
                     'best_val_pauc': best_val_pauc,
-                }, config.PAUC_TRAIN.CHECKPOINT_PATH)
-                print(f"Checkpoint Saved to {config.PAUC_TRAIN.CHECKPOINT_PATH} (best so far at epoch {epoch+1}).\n")
+                }, checkpoint_path)
+                print(f"Checkpoint Saved to {checkpoint_path} (best so far at epoch {epoch+1}).\n")
 
     accelerator.end_training()
