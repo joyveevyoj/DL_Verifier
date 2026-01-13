@@ -29,11 +29,12 @@ def _load_checkpoint(path, model, optimizer, scheduler, accelerator):
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
     start_epoch = checkpoint.get('epoch', -1) + 1
+    start_global_step = checkpoint.get('global_step', -1) + 1
     best_val_pauc = checkpoint.get('best_val_pauc', 0.0)
     # Only print on the main process to avoid clutter
     if accelerator.is_local_main_process:
         print(f"Resuming training from {path} (starting epoch {start_epoch}, best val pauc {best_val_pauc:.4f})")
-    return start_epoch, best_val_pauc
+    return start_epoch, start_global_step, best_val_pauc
 
 
 def _ensure_parent_dir(path: str):
@@ -119,9 +120,10 @@ def train_pAUC(config, raw_questions, mode="pauc"):
 
     run_start_epoch = 0
     best_val_pauc = 0.0
+    global_step = 0
 
     if config.PAUC_TRAIN.START_FROM_CHECKPOINT:
-        run_start_epoch, best_val_pauc = _load_checkpoint(
+        run_start_epoch, global_step, best_val_pauc = _load_checkpoint(
             config.PAUC_TRAIN.START_FROM_CHECKPOINT,
             model,
             optimizer,
@@ -130,16 +132,13 @@ def train_pAUC(config, raw_questions, mode="pauc"):
         )
 
     for epoch in range(run_start_epoch, config.PAUC_TRAIN.EPOCH_NUM):
-        model.train()
         total_loss = 0
 
         progress_bar = tqdm(enumerate(train_loader), total=len(train_loader),
                             desc=f"Epoch {epoch+1}", disable=not accelerator.is_local_main_process)
 
         for step, batch in progress_bar:
-            # We skip accelerator.accumulate() context for LibAUC SOPAs because it manages its own updates often,
-            # but for standard gradient accumulation logic, we can use it if supported.
-            # Assuming standard accumulation logic applies to the backward pass:
+            model.train()
             with accelerator.accumulate(model):
                 outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
                 logits = outputs.logits.squeeze(-1)
@@ -156,78 +155,80 @@ def train_pAUC(config, raw_questions, mode="pauc"):
 
                 current_loss = loss.item()
                 total_loss += current_loss
-                accelerator.log({"train/loss": current_loss})
+                accelerator.log({"train/loss": current_loss, "train/lr": scheduler.get_last_lr()[0]}, step=global_step)
                 progress_bar.set_postfix({'loss': current_loss})
 
-        avg_train_loss = total_loss / len(train_loader)
+            if global_step % config.PAUC_TRAIN.VAL_STEP_INTERVAL == 0:
+                # Validation Loop
+                model.eval()
+                val_pred_list = []
+                val_true_list = []
 
-        # Validation Loop
-        model.eval()
-        val_pred_list = []
-        val_true_list = []
+                if accelerator.is_local_main_process:
+                    print(f"Validating Epoch {epoch+1}...")
 
-        if accelerator.is_local_main_process:
-            print(f"Validating Epoch {epoch+1}...")
+                with torch.no_grad():
+                    for batch in val_loader:
+                        outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
+                        logits = outputs.logits.squeeze(-1)
+                        probs = torch.sigmoid(logits)
 
-        with torch.no_grad():
-            for batch in val_loader:
-                outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'])
-                logits = outputs.logits.squeeze(-1)
-                probs = torch.sigmoid(logits)
+                        # Gather predictions and labels from all gpus
+                        probs, labels = accelerator.gather_for_metrics((probs, batch['labels']))
 
-                # Gather predictions
-                probs, labels = accelerator.gather_for_metrics((probs, batch['labels']))
+                        val_pred_list.append(probs.detach().cpu().float().numpy())
+                        val_true_list.append(labels.cpu().numpy())
 
-                val_pred_list.append(probs.detach().cpu().float().numpy())
-                val_true_list.append(labels.cpu().numpy())
+                # Metrics calculation (only on main process)
+                if accelerator.is_main_process:
+                    if len(val_true_list) > 0:
+                        val_pred = np.concatenate(val_pred_list)
+                        val_true = np.concatenate(val_true_list)
 
-        # Metrics calculation (only on main process)
-        if accelerator.is_main_process:
-            if len(val_true_list) > 0:
-                val_pred = np.concatenate(val_pred_list)
-                val_true = np.concatenate(val_true_list)
+                        predictions = (val_pred > 0.5).astype(float)
+                        val_correct = (predictions == val_true).sum()
+                        val_total = len(val_true)
+                        val_acc = val_correct / val_total
 
-                predictions = (val_pred > 0.5).astype(float)
-                val_correct = (predictions == val_true).sum()
-                val_total = len(val_true)
-                val_acc = val_correct / val_total
+                        try:
+                            val_pauc = auc_roc_score(val_true, val_pred, max_fpr=config.P_AUC_MAX_FPR)
+                        except:
+                            val_pauc = 0.0
+                    else:
+                        val_acc = 0.0
+                        val_pauc = 0.0
 
-                try:
-                    val_pauc = auc_roc_score(val_true, val_pred, max_fpr=config.P_AUC_MAX_FPR)
-                except:
-                    val_pauc = 0.0
-            else:
-                val_acc = 0.0
-                val_pauc = 0.0
+                    avg_train_loss = total_loss / (step + 1)
+                    print(f"Epoch {epoch+1} Progress | Train Loss: {avg_train_loss:.4f} | Val Acc: {val_acc:.2%} | Val pAUC: {val_pauc:.4f}")
 
-            print(f"Epoch {epoch+1} Finished | Train Loss: {avg_train_loss:.4f} | Val Acc: {val_acc:.2%} | Val pAUC: {val_pauc:.4f}")
+                    # Log Validation Metrics
+                    accelerator.log({
+                        "val/acc": val_acc,
+                        "val/pauc": val_pauc,
+                        "epoch": epoch + 1
+                    }, step=global_step)
 
-            # Log Validation Metrics
-            global_step = (epoch + 1) * len(train_loader)
-            accelerator.log({
-                "val/acc": val_acc,
-                "val/pauc": val_pauc,
-                "epoch": epoch + 1
-            }, step=global_step)
+                    if val_pauc >= best_val_pauc:
+                        best_val_pauc = val_pauc
+                        print(f"New best model found (pAUC: {best_val_pauc:.4f}). Saving checkpoint...")
+                        os.makedirs(config.PAUC_TRAIN.OUTPUT_DIR, exist_ok=True)
 
-            if val_pauc >= best_val_pauc:
-                best_val_pauc = val_pauc
-                print(f"New best model found (pAUC: {best_val_pauc:.4f}). Saving checkpoint...")
-                os.makedirs(config.PAUC_TRAIN.OUTPUT_DIR, exist_ok=True)
+                        checkpoint_path = os.path.join(config.PAUC_TRAIN.CHECKPOINT_DIR, f"best_model_step_{global_step}.pt")
+                        _ensure_parent_dir(checkpoint_path)
+                        unwrapped_model = accelerator.unwrap_model(model)
+                        unwrapped_model.save_pretrained(config.PAUC_TRAIN.OUTPUT_DIR)
+                        tokenizer.save_pretrained(config.PAUC_TRAIN.OUTPUT_DIR)
 
-                checkpoint_path = os.path.join(config.PAUC_TRAIN.CHECKPOINT_DIR, f"best_model_epoch_{epoch+1}.pt")
-                _ensure_parent_dir(checkpoint_path)
-                unwrapped_model = accelerator.unwrap_model(model)
-                unwrapped_model.save_pretrained(config.PAUC_TRAIN.OUTPUT_DIR)
-                tokenizer.save_pretrained(config.PAUC_TRAIN.OUTPUT_DIR)
+                        torch.save({
+                            'epoch': epoch,
+                            'global_step': global_step,
+                            'model_state_dict': unwrapped_model.state_dict(),
+                            'optimizer_state_dict': optimizer.state_dict(),
+                            'scheduler_state_dict': scheduler.state_dict(),
+                            'best_val_pauc': best_val_pauc,
+                        }, checkpoint_path)
+                        print(f"Checkpoint Saved to {checkpoint_path} (best so far at step {global_step}, epoch {epoch+1}).\n")
 
-                torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': unwrapped_model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'scheduler_state_dict': scheduler.state_dict(),
-                    'best_val_pauc': best_val_pauc,
-                }, checkpoint_path)
-                print(f"Checkpoint Saved to {checkpoint_path} (best so far at epoch {epoch+1}).\n")
+            global_step += 1
 
     accelerator.end_training()

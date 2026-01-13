@@ -15,15 +15,16 @@ P_AUC_MAX_FPR: 0.3
 BCE_TRAIN:
   BATCH_SIZE: 32
   GRAD_ACCUMULATION_STEPS: 1
-  EPOCH_NUM: 5
+  EPOCH_NUM: 20
   LEARNING_RATE: 0.0002  # 2e-4
   MAX_LENGTH: 256
-  DEBUG_SAMPLE_SIZE: null  # Set to null for full dataset
+  DEBUG_SAMPLE_SIZE: 2000  # Set to null for full dataset
   OUTPUT_DIR: "./outputs/bce"  # Directory to save model checkpoints
   CHECKPOINT_DIR: "./outputs/bce"  # Path to save training state
   LORA_R: 8
   LORA_ALPHA: 16
   LORA_DROPOUT: 0.1
+  VAL_STEP_INTERVAL: 200  # Validate every N steps
   START_FROM_CHECKPOINT: null
 
 
@@ -34,7 +35,7 @@ PAUC_TRAIN:
   EPOCH_NUM: 5
   LEARNING_RATE: 0.0002  # 2e-4
   MAX_LENGTH: 256
-  DEBUG_SAMPLE_SIZE: null  # Set to null for full dataset
+  DEBUG_SAMPLE_SIZE: 2000  # Set to null for full dataset
   OUTPUT_DIR: "./outputs/pauc"  # Directory to save pAUC checkpoints
   CHECKPOINT_DIR: "./outputs/pauc"
   MARGIN: 0.2
@@ -44,5 +45,6 @@ PAUC_TRAIN:
   LORA_R: 8
   LORA_ALPHA: 16
   LORA_DROPOUT: 0.1
+  VAL_STEP_INTERVAL: 200  # Validate every N steps
   START_FROM_CHECKPOINT: null
   SAMPLING_RATE: 0.5
