@@ -40,18 +40,8 @@ def _ensure_parent_dir(path: str):
         os.makedirs(parent, exist_ok=True)
 
 
-def train_bce(config, raw_questions, mode="bce"):
-    accelerator = Accelerator(
-        log_with="wandb",
-        gradient_accumulation_steps=config.BCE_TRAIN.GRAD_ACCUMULATION_STEPS
-    )
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = f"{mode}_{timestamp}"
-    accelerator.init_trackers(
-        project_name="llm-verifier",
-        config=vars(config.BCE_TRAIN),
-        init_kwargs={"wandb": {"entity": "deeplearning-llm-verifier", "name": run_name}}
-    )
+def train_bce(config, raw_questions, accelerator, timestamp, mode="bce"):
+    accelerator.gradient_accumulation_steps = config.BCE_TRAIN.GRAD_ACCUMULATION_STEPS
 
     tokenizer = AutoTokenizer.from_pretrained(config.MODEL_NAME)
     if tokenizer.pad_token is None:
@@ -75,6 +65,7 @@ def train_bce(config, raw_questions, mode="bce"):
     train_loader = DataLoader(train_dataset, batch_size=config.BCE_TRAIN.BATCH_SIZE, shuffle=True, collate_fn=collator, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=config.BCE_TRAIN.BATCH_SIZE, shuffle=False, collate_fn=collator, pin_memory=True)
     num_training_steps = len(train_loader) * config.BCE_TRAIN.EPOCH_NUM // config.BCE_TRAIN.GRAD_ACCUMULATION_STEPS
+    num_warmup_steps = int(num_training_steps * config.BCE_TRAIN.WARMUP_RATIO)
 
     # Build model with LoRA configuration
     model = build_bce_model(
@@ -85,11 +76,10 @@ def train_bce(config, raw_questions, mode="bce"):
         pad_token_id=tokenizer.pad_token_id,
         config=config
     )
-    # model = model.to(config.DEVICE)
 
     optimizer = AdamW(model.parameters(), lr=config.BCE_TRAIN.LEARNING_RATE)
     criterion = torch.nn.BCEWithLogitsLoss()
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
 
     model, optimizer, train_loader, val_loader, scheduler = accelerator.prepare(
         model, optimizer, train_loader, val_loader, scheduler
@@ -125,6 +115,10 @@ def train_bce(config, raw_questions, mode="bce"):
 
                 # Use accelerator for backward pass
                 accelerator.backward(loss)
+
+                if accelerator.sync_gradients:
+                    # Gradient clipping
+                    accelerator.clip_grad_norm_(model.parameters(), config.BCE_TRAIN.MAX_GRAD_NORM)
 
                 optimizer.step()
                 scheduler.step()
@@ -191,14 +185,16 @@ def train_bce(config, raw_questions, mode="bce"):
                     if val_acc >= best_val_acc:
                         best_val_acc = val_acc
                         print("New best model found. Saving checkpoint...")
-                        os.makedirs(config.BCE_TRAIN.OUTPUT_DIR, exist_ok=True)
+                        outputs_dir = os.path.join(config.BCE_TRAIN.OUTPUT_DIR, f"{mode}_{timestamp}")
+                        os.makedirs(outputs_dir, exist_ok=True)
 
-                        checkpoint_path = os.path.join(config.BCE_TRAIN.CHECKPOINT_DIR, f"best_model_step_{global_step}.pt")
+                        checkpoint_path = os.path.join(config.BCE_TRAIN.CHECKPOINT_DIR, f"{mode}_{timestamp}", f"best_model_step_{global_step}.pt")
                         _ensure_parent_dir(checkpoint_path)
+
                         # Unwrap model before saving to remove DDP wrapper
                         unwrapped_model = accelerator.unwrap_model(model)
-                        unwrapped_model.save_pretrained(config.BCE_TRAIN.OUTPUT_DIR)
-                        tokenizer.save_pretrained(config.BCE_TRAIN.OUTPUT_DIR)
+                        unwrapped_model.save_pretrained(outputs_dir)
+                        tokenizer.save_pretrained(outputs_dir)
 
                         torch.save({
                             'epoch': epoch,

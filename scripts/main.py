@@ -6,6 +6,8 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from accelerate import Accelerator
+from datetime import datetime
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -73,11 +75,29 @@ def main():
     if bce_cfg.DEBUG_SAMPLE_SIZE:
         print(f"Using DEBUG mode: {bce_cfg.DEBUG_SAMPLE_SIZE} samples")
 
-    if args.mode in ("bce", "both"):
-        train_bce(config, raw_questions, mode=args.mode)
-    if args.mode in ("pauc", "both"):
-        train_pAUC(config, raw_questions, mode=args.mode)
+    accelerator = Accelerator(log_with="wandb")
 
+    if args.mode == "bce":
+        wandb_config = vars(config.BCE_TRAIN)
+    elif args.mode == "pauc":
+        wandb_config = vars(config.PAUC_TRAIN)
+    elif args.mode == "both":
+        wandb_config = {**vars(config.BCE_TRAIN), **vars(config.PAUC_TRAIN)}
+    else:
+        raise ValueError(f"Unknown mode: {args.mode}")
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = f"{args.mode}_{timestamp}"
+    accelerator.init_trackers(
+        project_name="llm-verifier",
+        config=wandb_config,
+        init_kwargs={"wandb": {"entity": "deeplearning-llm-verifier", "name": run_name}}
+    )
+
+    if args.mode in ("bce", "both"):
+        train_bce(config, raw_questions, accelerator, timestamp, args.mode)
+    if args.mode in ("pauc", "both"):
+        train_pAUC(config, raw_questions, accelerator, timestamp, args.mode)
 
 if __name__ == '__main__':
     main()

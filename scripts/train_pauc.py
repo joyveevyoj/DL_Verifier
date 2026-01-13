@@ -60,18 +60,8 @@ def _make_collator_with_index(tokenizer):
     return collate
 
 
-def train_pAUC(config, raw_questions, mode="pauc"):
-    accelerator = Accelerator(
-        log_with="wandb",
-        gradient_accumulation_steps=config.PAUC_TRAIN.GRAD_ACCUMULATION_STEPS
-    )
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = f"{mode}_{timestamp}"
-    accelerator.init_trackers(
-        project_name="llm-verifier",
-        config=vars(config.PAUC_TRAIN) if hasattr(config.PAUC_TRAIN, '__dict__') else {},
-        init_kwargs={"wandb": {"entity": "deeplearning-llm-verifier", "name": run_name}}
-    )
+def train_pAUC(config, raw_questions, accelerator, timestamp, mode="pauc"):
+    accelerator.gradient_accumulation_steps = config.PAUC_TRAIN.GRAD_ACCUMULATION_STEPS
 
     tokenizer = AutoTokenizer.from_pretrained(config.MODEL_NAME)
     if tokenizer.pad_token is None:
@@ -98,6 +88,7 @@ def train_pAUC(config, raw_questions, mode="pauc"):
     train_loader = DataLoader(train_dataset, batch_size=config.PAUC_TRAIN.BATCH_SIZE, sampler=sampler, shuffle=False, collate_fn=collator, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=config.PAUC_TRAIN.BATCH_SIZE, shuffle=False, collate_fn=collator, pin_memory=True)
     num_training_steps = len(train_loader) * config.PAUC_TRAIN.EPOCH_NUM // config.PAUC_TRAIN.GRAD_ACCUMULATION_STEPS
+    num_warmup_steps = int(num_training_steps * config.PAUC_TRAIN.WARMUP_RATIO)
 
     # Build model with LoRA configuration
     model = build_bce_model(
@@ -108,11 +99,10 @@ def train_pAUC(config, raw_questions, mode="pauc"):
         pad_token_id=tokenizer.pad_token_id,
         config=config
     )
-    # model = model.to(config.DEVICE)
 
     loss_fn = pAUCLoss('1w', data_len=len(train_dataset), margin=config.PAUC_TRAIN.MARGIN, gamma=config.PAUC_TRAIN.GAMMA)
     optimizer = SOPAs(model.parameters(), mode='adam', lr=config.PAUC_TRAIN.LEARNING_RATE, weight_decay=config.PAUC_TRAIN.WEIGHT_DECAY)
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=num_training_steps)
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
 
     model, optimizer, train_loader, val_loader, scheduler = accelerator.prepare(
         model, optimizer, train_loader, val_loader, scheduler
@@ -148,6 +138,10 @@ def train_pAUC(config, raw_questions, mode="pauc"):
 
                 # Replaced backward
                 accelerator.backward(loss)
+
+                if accelerator.sync_gradients:
+                    # Gradient clipping
+                    accelerator.clip_grad_norm_(model.parameters(), config.PAUC_TRAIN.MAX_GRAD_NORM)
 
                 optimizer.step()
                 scheduler.step()
@@ -211,14 +205,15 @@ def train_pAUC(config, raw_questions, mode="pauc"):
                     if val_pauc >= best_val_pauc:
                         best_val_pauc = val_pauc
                         print(f"New best model found (pAUC: {best_val_pauc:.4f}). Saving checkpoint...")
-                        os.makedirs(config.PAUC_TRAIN.OUTPUT_DIR, exist_ok=True)
+                        outputs_dir = os.path.join(config.PAUC_TRAIN.OUTPUT_DIR, f"{mode}_{timestamp}")
+                        os.makedirs(outputs_dir, exist_ok=True)
 
-                        checkpoint_path = os.path.join(config.PAUC_TRAIN.CHECKPOINT_DIR, f"best_model_step_{global_step}.pt")
+                        checkpoint_path = os.path.join(config.PAUC_TRAIN.CHECKPOINT_DIR, f"{mode}_{timestamp}", f"best_model_step_{global_step}.pt")
                         _ensure_parent_dir(checkpoint_path)
-                        unwrapped_model = accelerator.unwrap_model(model)
-                        unwrapped_model.save_pretrained(config.PAUC_TRAIN.OUTPUT_DIR)
-                        tokenizer.save_pretrained(config.PAUC_TRAIN.OUTPUT_DIR)
 
+                        unwrapped_model = accelerator.unwrap_model(model)
+                        unwrapped_model.save_pretrained(outputs_dir)
+                        tokenizer.save_pretrained(outputs_dir)
                         torch.save({
                             'epoch': epoch,
                             'global_step': global_step,
