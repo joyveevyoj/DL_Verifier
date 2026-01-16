@@ -208,7 +208,7 @@ def train_pAUC(config, raw_questions, accelerator, timestamp, mode="pauc"):
                         outputs_dir = os.path.join(config.PAUC_TRAIN.OUTPUT_DIR, f"{mode}_{timestamp}")
                         os.makedirs(outputs_dir, exist_ok=True)
 
-                        checkpoint_path = os.path.join(config.PAUC_TRAIN.CHECKPOINT_DIR, f"{mode}_{timestamp}", f"best_model_step_{global_step}.pt")
+                        checkpoint_path = os.path.join(config.PAUC_TRAIN.CHECKPOINT_DIR, f"{mode}_{timestamp}", f"pauc_best_model.pt")
                         _ensure_parent_dir(checkpoint_path)
 
                         unwrapped_model = accelerator.unwrap_model(model)

@@ -188,7 +188,7 @@ def train_bce(config, raw_questions, accelerator, timestamp, mode="bce"):
                         outputs_dir = os.path.join(config.BCE_TRAIN.OUTPUT_DIR, f"{mode}_{timestamp}")
                         os.makedirs(outputs_dir, exist_ok=True)
 
-                        checkpoint_path = os.path.join(config.BCE_TRAIN.CHECKPOINT_DIR, f"{mode}_{timestamp}", f"best_model_step_{global_step}.pt")
+                        checkpoint_path = os.path.join(config.BCE_TRAIN.CHECKPOINT_DIR, f"{mode}_{timestamp}", f"bce_best_model.pt")
                         _ensure_parent_dir(checkpoint_path)
 
                         # Unwrap model before saving to remove DDP wrapper

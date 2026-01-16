@@ -88,6 +88,11 @@ def main():
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_name = f"{args.mode}_{timestamp}"
+    if bce_cfg.DEBUG_SAMPLE_SIZE:
+        run_name += f"_sample_{bce_cfg.DEBUG_SAMPLE_SIZE}"
+    else:
+        run_name += "_full"
+
     accelerator.init_trackers(
         project_name="llm-verifier",
         config=wandb_config,
