@@ -450,7 +450,7 @@ def main():
     from transformers import AutoTokenizer
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--n", type=int, default=10, help="How many questions to evaluate")
+    parser.add_argument("--n", type=int, default=50, help="How many questions to evaluate")
     parser.add_argument("--best_n", type=int, default=32, help="N for the Best-of-N strategy")
     parser.add_argument("--threshold", type=float, default=0.5, help="Rejection sampling sigmoid(prob) threshold, e.g. 0.5")
     parser.add_argument("--lambd", type=float, default=0.01, help="Cost coefficient for adaptive_n")
@@ -518,7 +518,7 @@ def main():
         verifier = BinaryVerifier(model=model, tokenizer=tokenizer, max_length=vcfg.MAX_LENGTH)
     else:  # two_head
         vcfg = config.TWO_HEAD_TRAIN
-        ckpt_path = repo_root / config.TWO_HEAD_TRAIN.CHECKPOINT_DIR / "two_head_best_pauc.pt"
+        ckpt_path = repo_root / config.TWO_HEAD_TRAIN.CHECKPOINT_DIR / "two_head_best.pt"
         model = build_two_head_model(
             model_name=config.MODEL_NAME,
             device=config.DEVICE,
@@ -572,22 +572,25 @@ def main():
 
         # Slice answers for Best-of-N and Rejection Sampling based on --best_n
         # (Adaptive N handles its own slicing/sampling)
-        comp_answers = answers[: args.best_n]
-        comp_labels = labels[: args.best_n]
+        comp_answers_best = answers[: args.best_n]
+        comp_labels_best = labels[: args.best_n]
 
-        if not comp_answers:
+        if not comp_answers_best:
             continue
 
         # 1. Random Sampling (Baseline)
-        correct_random += 1 if int(comp_labels[0]) == 1 else 0
+        correct_random += 1 if int(comp_labels_best[0]) == 1 else 0
 
         # 2. Best-of-N (Head A)
-        chosen_best = best_of_n(q, comp_answers, verifier, batch_size=1)
-        correct_best += 1 if int(comp_labels[comp_answers.index(chosen_best)]) == 1 else 0
+        chosen_best = best_of_n(q, comp_answers_best, verifier, batch_size=1)
+        correct_best += 1 if int(comp_labels_best[comp_answers_best.index(chosen_best)]) == 1 else 0
 
         # 3. Rejection Sampling (Head A)
-        chosen_rej, rej_samples = rejection_sampling_from_candidates(q, comp_answers, verifier, threshold=args.threshold)
-        correct_reject += 1 if int(comp_labels[comp_answers.index(chosen_rej)]) == 1 else 0
+        # For rejection sampling, use a default budget of 32 even if --best_n is different
+        comp_answers_rej = answers[:32]
+        comp_labels_rej = labels[:32]
+        chosen_rej, rej_samples = rejection_sampling_from_candidates(q, comp_answers_rej, verifier, threshold=args.threshold)
+        correct_reject += 1 if int(comp_labels_rej[comp_answers_rej.index(chosen_rej)]) == 1 else 0
         total_rej_samples += rej_samples
 
         # 4. Adaptive N (Head B + Head A) - Only for TwoHead

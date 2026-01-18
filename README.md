@@ -6,8 +6,8 @@ Test-time scaling experiment for LLM verification using Qwen3-0.6B on GSM8K data
 
 The core logic of this project is located in the `Scripts/` directory:
 
-- `train_one_head_roc.py`: Main entry point for Stage 1 training (BCE/pAUC).
-- `train_two_head.py`: Main entry point for Stage 2 training (Difficulty Prediction).
+- `correctness_prediction_train.py`: Main entry point for Stage 1 training (BCE/pAUC).
+- `difficulty_prediction_train.py`: Main entry point for Stage 2 training (Difficulty Prediction).
 - `Verification_strategy.py`: Evaluation script for comparing verification strategies (Best-of-N, Adaptive N, etc.).
 - `two_head_model.py`: Model architecture for the two-head verifier (Classification + Difficulty).
 - `lora_model.py`: Model building logic for Stage 1 verifiers using LoRA adapters.
@@ -55,10 +55,10 @@ unzip data/verifier_dataset_train.zip -d data/
 ```
 Ensure `data/verifier_dataset_train.json` and `data/verifier_dataset_test.json` are present.
 
-### 1. First Stage Training One-Head Verifier (ROC/pAUC)
-To train the binary classification verifier optimizing for the AUC-ROC metric:
+### 1. First Stage Training: Correctness Prediction (ROC/pAUC)
+To train the binary classification verifier (Head A) optimizing for the AUC-ROC or pAUC metric:
 ```bash
-python Scripts/train_one_head_roc.py --mode bce
+python Scripts/correctness_prediction_train.py --mode bce
 ```
 **Arguments:**
 - `--mode`: Which training flow to run. Options:
@@ -66,10 +66,10 @@ python Scripts/train_one_head_roc.py --mode bce
     - `pauc`: Trains for partial AUC optimization and saves `pauc_best_model.pt`.
     - `both`: Runs both training flows sequentially and saves both checkpoints.
 
-### 2. Second Stage Training Two-Head Model (Difficulty Prediction)
+### 2. Second Stage Training: Difficulty Prediction
 Stage 2 training for the difficulty prediction head (Head B) using the pre-trained verifier (Head A). This script uses settings from the `TWO_HEAD_TRAIN` section in `config.yaml`.
 ```bash
-python Scripts/train_two_head.py
+python Scripts/difficulty_prediction_train.py
 ```
 **Notes:**
 - It loads a pre-trained BCE model (specified by `START_FROM_CHECKPOINT` in `config.yaml`) and trains a second head for difficulty prediction.
