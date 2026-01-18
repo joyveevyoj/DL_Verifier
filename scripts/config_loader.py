@@ -17,12 +17,12 @@ def _resolve_path(path):
     # Try a few common locations so this works regardless of CWD:
     # 1) As given (relative to current working directory)
     # 2) Repo root
-    # 3) Dir: scripts/ (where config.yaml currently lives)
+    # 3) Dir: Scripts/ (where config.yaml currently lives)
     repo_root = Path(__file__).resolve().parent.parent
     candidates = [
         Path.cwd() / p,
         repo_root / p,
-        repo_root / "scripts" / p,
+        repo_root / "Scripts" / p,
     ]
     for candidate in candidates:
         if candidate.exists():
@@ -38,4 +38,16 @@ def load_config(path):
     namespace = _to_namespace(data)
     if getattr(namespace, "DEVICE", "").lower() == "auto":
         namespace.DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Coerce numeric fields that might be loaded as strings (e.g. 1e-4)
+    for section in ("BCE_TRAIN", "PAUC_TRAIN", "TWO_HEAD_TRAIN"):
+        if hasattr(namespace, section):
+            hp = getattr(namespace, section)
+            for key in ("LEARNING_RATE", "WARMUP_RATIO", "MAX_GRAD_NORM", "WEIGHT_DECAY", "MARGIN", "GAMMA", "SAMPLING_RATE", "P_AUC_MAX_FPR"):
+                val = getattr(hp, key, None)
+                if isinstance(val, str):
+                    try:
+                        setattr(hp, key, float(val))
+                    except ValueError:
+                        pass
     return namespace

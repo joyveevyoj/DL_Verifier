@@ -4,6 +4,7 @@ MODEL_NAME: "Qwen/Qwen3-0.6B"
 # Dataset Paths
 # Use relative path from project root
 TRAIN_DATASET_PATH: "data/verifier_dataset_train.json"
+TEST_DATASET_PATH: "data/verifier_dataset_test.json"
 
 # Device Configuration
 # Options: "cuda", "cpu", "mps" (for Apple Silicon)
@@ -28,6 +29,7 @@ BCE_TRAIN:
   LORA_DROPOUT: 0.1
   VAL_STEP_INTERVAL: 100  # Validate every N steps
   START_FROM_CHECKPOINT: null
+  CHECKPOINT_PATH: "checkpoints/bce_best_model.pt"
 
 # pAUC Training Configuration
 PAUC_TRAIN:
@@ -51,3 +53,23 @@ PAUC_TRAIN:
   VAL_STEP_INTERVAL: 100  # Validate every N steps
   START_FROM_CHECKPOINT: null
   SAMPLING_RATE: 0.5
+  CHECKPOINT_PATH: "checkpoints/pauc_best_model.pt"
+
+# Two-Head Training Configuration (Stage 2)
+TWO_HEAD_TRAIN:
+  BATCH_SIZE: 4
+  GRAD_ACCUMULATION_STEPS: 2
+  EPOCH_NUM: 5
+  LEARNING_RATE: 0.0001  # 1e-4
+  MAX_GRAD_NORM: 1.0
+  WARMUP_RATIO: 0.1
+  MAX_LENGTH: 256
+  DEBUG_SAMPLE_SIZE: null
+  OUTPUT_DIR: "./outputs_two_head"
+  CHECKPOINT_DIR: "./checkpoints/two_head"
+  LORA_R: 8
+  LORA_ALPHA: 16
+  LORA_DROPOUT: 0.1
+  VAL_STEP_INTERVAL: 100
+  START_FROM_CHECKPOINT: "checkpoints/bce_best_model.pt"
+  LAMBDA: 0.005
