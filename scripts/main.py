@@ -72,26 +72,30 @@ def main():
         raw_questions = json.load(f)
 
     print(f"Loaded {len(raw_questions)} samples")
-    if bce_cfg.DEBUG_SAMPLE_SIZE:
-        print(f"Using DEBUG mode: {bce_cfg.DEBUG_SAMPLE_SIZE} samples")
 
     accelerator = Accelerator(log_with="wandb")
 
-    if args.mode == "bce":
-        wandb_config = vars(config.BCE_TRAIN)
-    elif args.mode == "pauc":
-        wandb_config = vars(config.PAUC_TRAIN)
-    elif args.mode == "both":
-        wandb_config = {**vars(config.BCE_TRAIN), **vars(config.PAUC_TRAIN)}
-    else:
-        raise ValueError(f"Unknown mode: {args.mode}")
-
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_name = f"{args.mode}_{timestamp}"
-    if bce_cfg.DEBUG_SAMPLE_SIZE:
-        run_name += f"_sample_{bce_cfg.DEBUG_SAMPLE_SIZE}"
+
+    if args.mode == "bce":
+        wandb_config = vars(bce_cfg)
+        if bce_cfg.DEBUG_SAMPLE_SIZE:
+            run_name += f"_sample_{bce_cfg.DEBUG_SAMPLE_SIZE}"
+            print(f"Using DEBUG mode: {bce_cfg.DEBUG_SAMPLE_SIZE} samples")
+        else:
+            run_name += "_full"
+    elif args.mode == "pauc":
+        wandb_config = vars(pauc_cfg)
+        if pauc_cfg.DEBUG_SAMPLE_SIZE:
+            run_name += f"_sample_{pauc_cfg.DEBUG_SAMPLE_SIZE}"
+            print(f"Using DEBUG mode: {pauc_cfg.DEBUG_SAMPLE_SIZE} samples")
+        else:
+            run_name += "_full"
+    elif args.mode == "both":
+        wandb_config = vars(config)
     else:
-        run_name += "_full"
+        raise ValueError(f"Unknown mode: {args.mode}")
 
     accelerator.init_trackers(
         project_name="llm-verifier",

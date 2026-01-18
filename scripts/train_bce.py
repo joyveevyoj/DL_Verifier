@@ -12,7 +12,7 @@ from transformers import (
     get_linear_schedule_with_warmup,
     DataCollatorWithPadding
 )
-from libauc.metrics import auc_roc_score
+from libauc.metrics import pauc_roc_score
 import random
 from datetime import datetime
 
@@ -165,7 +165,7 @@ def train_bce(config, raw_questions, accelerator, timestamp, mode="bce"):
                         val_acc = val_correct / val_total
 
                         try:
-                            val_pauc = auc_roc_score(val_true, val_pred, max_fpr=config.P_AUC_MAX_FPR)
+                            val_pauc = pauc_roc_score(val_true, val_pred, max_fpr=config.P_AUC_MAX_FPR, min_tpr=config.P_AUC_MIN_TPR)
                         except:
                             val_pauc = 0.0
                     else:
@@ -185,10 +185,14 @@ def train_bce(config, raw_questions, accelerator, timestamp, mode="bce"):
                     if val_acc >= best_val_acc:
                         best_val_acc = val_acc
                         print("New best model found. Saving checkpoint...")
-                        outputs_dir = os.path.join(config.BCE_TRAIN.OUTPUT_DIR, f"{mode}_{timestamp}")
+                        outputs_dir = os.path.join(
+                            config.BCE_TRAIN.OUTPUT_DIR, f"{mode}_{timestamp}_sample_{config.BCE_TRAIN.DEBUG_SAMPLE_SIZE}" if config.BCE_TRAIN.DEBUG_SAMPLE_SIZE else f"{mode}_{timestamp}_full"
+                        )
                         os.makedirs(outputs_dir, exist_ok=True)
 
-                        checkpoint_path = os.path.join(config.BCE_TRAIN.CHECKPOINT_DIR, f"{mode}_{timestamp}", f"bce_best_model.pt")
+                        checkpoint_path = os.path.join(
+                            config.BCE_TRAIN.CHECKPOINT_DIR, f"{mode}_{timestamp}_sample_{config.BCE_TRAIN.DEBUG_SAMPLE_SIZE}" if config.BCE_TRAIN.DEBUG_SAMPLE_SIZE else f"{mode}_{timestamp}_full", f"bce_best_model.pt"
+                        )
                         _ensure_parent_dir(checkpoint_path)
 
                         # Unwrap model before saving to remove DDP wrapper

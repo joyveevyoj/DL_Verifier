@@ -9,7 +9,8 @@ TRAIN_DATASET_PATH: "data/verifier_dataset_train.json"
 # Options: "cuda", "cpu", "mps" (for Apple Silicon)
 # If set to "auto", will automatically detect available device
 DEVICE: "auto"
-P_AUC_MAX_FPR: 0.3
+P_AUC_MAX_FPR: 0.5
+P_AUC_MIN_TPR: 0.5
 
 # BCE Training Configuration
 BCE_TRAIN:
@@ -41,8 +42,9 @@ PAUC_TRAIN:
   DEBUG_SAMPLE_SIZE: null  # Set to null for full dataset
   OUTPUT_DIR: "./outputs"  # Directory to save pAUC outputs. Full dir will be OUTPUT_DIR/{mode}_{timestamp}
   CHECKPOINT_DIR: "./checkpoints"  # Path to save pAUC checkpoints.  Full dir will be CHECKPOINT_DIR/{mode}_{timestamp}
-  MARGIN: 0.8
-  GAMMA: 0.5
+  MARGIN: 1.0
+  GAMMA_1WAY: 0.5
+  GAMMAS_2WAY: [0.5, 0.5]
   # NOTE: use an explicit float so YAML always parses it as numeric (not a string)
   WEIGHT_DECAY: 2.0e-4
   LORA_R: 8

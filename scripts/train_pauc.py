@@ -14,9 +14,9 @@ from transformers import (
 import random
 import numpy as np
 from libauc.losses import pAUCLoss
-from libauc.optimizers import SOPAs
+from libauc.optimizers import SOPAs, SOTAs
 from libauc.sampler import DualSampler
-from libauc.metrics import auc_roc_score
+from libauc.metrics import pauc_roc_score
 from datetime import datetime
 
 
@@ -100,8 +100,10 @@ def train_pAUC(config, raw_questions, accelerator, timestamp, mode="pauc"):
         config=config
     )
 
-    loss_fn = pAUCLoss('1w', data_len=len(train_dataset), margin=config.PAUC_TRAIN.MARGIN, gamma=config.PAUC_TRAIN.GAMMA)
-    optimizer = SOPAs(model.parameters(), mode='adam', lr=config.PAUC_TRAIN.LEARNING_RATE, weight_decay=config.PAUC_TRAIN.WEIGHT_DECAY)
+    # loss_fn = pAUCLoss('1w', data_len=len(train_dataset), margin=config.PAUC_TRAIN.MARGIN, gamma=config.PAUC_TRAIN.GAMMA_1WAY)
+    loss_fn = pAUCLoss('2w', data_len=len(train_dataset), margin=config.PAUC_TRAIN.MARGIN, gammas=config.PAUC_TRAIN.GAMMAS_2WAY)
+    # optimizer = SOPAs(model.parameters(), mode='adam', lr=config.PAUC_TRAIN.LEARNING_RATE, weight_decay=config.PAUC_TRAIN.WEIGHT_DECAY)
+    optimizer = SOTAs(model.parameters(), mode='adam', lr=config.PAUC_TRAIN.LEARNING_RATE, weight_decay=config.PAUC_TRAIN.WEIGHT_DECAY)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps)
 
     model, optimizer, train_loader, val_loader, scheduler = accelerator.prepare(
@@ -185,7 +187,7 @@ def train_pAUC(config, raw_questions, accelerator, timestamp, mode="pauc"):
                         val_acc = val_correct / val_total
 
                         try:
-                            val_pauc = auc_roc_score(val_true, val_pred, max_fpr=config.P_AUC_MAX_FPR)
+                            val_pauc = pauc_roc_score(val_true, val_pred, max_fpr=config.P_AUC_MAX_FPR, min_tpr=config.P_AUC_MIN_TPR)
                         except:
                             val_pauc = 0.0
                     else:
@@ -205,10 +207,14 @@ def train_pAUC(config, raw_questions, accelerator, timestamp, mode="pauc"):
                     if val_pauc >= best_val_pauc:
                         best_val_pauc = val_pauc
                         print(f"New best model found (pAUC: {best_val_pauc:.4f}). Saving checkpoint...")
-                        outputs_dir = os.path.join(config.PAUC_TRAIN.OUTPUT_DIR, f"{mode}_{timestamp}")
+                        outputs_dir = os.path.join(
+                            config.PAUC_TRAIN.OUTPUT_DIR, f"{mode}_{timestamp}_sample_{config.PAUC_TRAIN.DEBUG_SAMPLE_SIZE}" if config.PAUC_TRAIN.DEBUG_SAMPLE_SIZE else f"{mode}_{timestamp}_full"
+                        )
                         os.makedirs(outputs_dir, exist_ok=True)
 
-                        checkpoint_path = os.path.join(config.PAUC_TRAIN.CHECKPOINT_DIR, f"{mode}_{timestamp}", f"pauc_best_model.pt")
+                        checkpoint_path = os.path.join(
+                            config.PAUC_TRAIN.CHECKPOINT_DIR, f"{mode}_{timestamp}_sample_{config.PAUC_TRAIN.DEBUG_SAMPLE_SIZE}" if config.PAUC_TRAIN.DEBUG_SAMPLE_SIZE else f"{mode}_{timestamp}_full", f"pauc_best_model.pt"
+                        )
                         _ensure_parent_dir(checkpoint_path)
 
                         unwrapped_model = accelerator.unwrap_model(model)
