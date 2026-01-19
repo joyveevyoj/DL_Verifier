@@ -1,0 +1,78 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+import numpy as np
+
+# Read the CSV file
+filename = "data/val_pauc_bce_sopas_results.csv"
+df = pd.read_csv(filename)
+
+# Use a clean style without grid by default
+plt.style.use("seaborn-v0_8-white")
+
+# Set global font settings
+plt.rcParams.update({"font.size": 12, "font.family": "sans-serif"})
+
+# Define the columns for X and Y axes
+x_col = "Step"
+y_cols = [
+    "pauc_20260113_233040_full - val/pauc",
+    "bce_20260113_233040_full - val/pauc"
+]
+
+max_step = df[x_col].max()
+max_bce_epoch = max_step / 1730
+# Create the figure with high DPI
+plt.figure(figsize=(10, 8), dpi=150)
+
+# Define a color palette
+colors = ["#1f77b4", "#ff7f0e"]
+
+# Iterate through the columns and plot each one
+for i, y_col in enumerate(y_cols):
+    # Determine the label and the specific step-per-epoch ratio
+    if "pauc" in y_col:
+        label_name = "SOPA"
+        steps_per_epoch = 1880 # SOPA conversion
+    if "bce" in y_col:
+        label_name = "BCE"
+        steps_per_epoch = 1730 # BCE conversion
+
+    # Calculate the specific Epochs x-axis for this line
+    # (Step / steps_per_epoch)
+    x_data_epochs = df[x_col] / steps_per_epoch
+
+    # Plot the line using the calculated epochs as x-axis
+    plt.plot(x_data_epochs, df[y_col], label=label_name, linewidth=2, color=colors[i % len(colors)])
+
+# Set axis labels and title
+plt.xlabel("Epochs", fontsize=14)
+plt.ylabel("pAUC", fontsize=14)
+plt.title("Validation pAUC (FPR $\leq$ 0.3)", fontsize=16)
+
+ticks = np.arange(0, int(max_bce_epoch) + 1)
+plt.xticks(ticks)
+plt.xlim(0, max_bce_epoch * 1.02)
+
+# Configure the legend
+plt.legend(frameon=True, fontsize=12, loc="lower right")
+
+# Explicitly disable the grid
+plt.grid(False)
+
+# Remove the top and right spines
+sns.despine()
+
+# Adjust layout
+plt.tight_layout()
+
+output_dir = "figures"
+output_filename = "val_pauc_sopas_bce_comparison.png"
+output_path = os.path.join(output_dir, output_filename)
+os.makedirs(output_dir, exist_ok=True)
+print(f"Saving figure to {output_path}...")
+plt.savefig(output_path, dpi=300, bbox_inches='tight')
+print("Done.")
+# Show the plot
+plt.show()

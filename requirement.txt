@@ -16,3 +16,4 @@ jupyterlab
 ipykernel
 libauc
 wandb
+seaborn
