@@ -17,9 +17,9 @@ repo_root = Path(__file__).resolve().parent.parent
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from Scripts.two_head_model import build_two_head_model
-from Scripts.verifier_dataset import Adaptive_N_VerifierDataset
-from Scripts.config_loader import load_config
+from scripts.two_head_model import build_two_head_model
+from scripts.verifier_dataset import Adaptive_N_VerifierDataset
+from scripts.config_loader import load_config
 
 def _ensure_parent_dir(path: str):
     parent = os.path.dirname(path)
@@ -29,11 +29,11 @@ def _ensure_parent_dir(path: str):
 def train_two_head():
     # 1. Setup Configuration & Accelerator
     config = load_config("config.yaml")
-    hp = config.TWO_HEAD_TRAIN 
-    
+    hp = config.TWO_HEAD_TRAIN
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_name = f"two_head_{timestamp}"
-    
+
     accelerator = Accelerator(log_with="wandb")
     accelerator.init_trackers(
         project_name="llm-verifier",
@@ -42,9 +42,9 @@ def train_two_head():
 
         init_kwargs={"wandb": {"name": run_name}}
     )
-    
+
     device = accelerator.device
-    
+
     # Paths
     checkpoint_path = hp.START_FROM_CHECKPOINT
     output_dir = os.path.join(hp.OUTPUT_DIR, run_name)
@@ -57,7 +57,7 @@ def train_two_head():
 
     if accelerator.is_main_process:
         print(f"Loading training data from {config.TRAIN_DATASET_PATH}...")
-    
+
     with open(config.TRAIN_DATASET_PATH, 'r', encoding='utf-8') as f:
         raw_data = json.load(f)
 
@@ -98,11 +98,11 @@ def train_two_head():
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=hp.LEARNING_RATE)
     criterion = nn.BCEWithLogitsLoss()
-    
+
     num_training_steps = len(train_loader) * hp.EPOCH_NUM // hp.GRAD_ACCUMULATION_STEPS
     scheduler = get_linear_schedule_with_warmup(
-        optimizer, 
-        num_warmup_steps=int(hp.WARMUP_RATIO * num_training_steps), 
+        optimizer,
+        num_warmup_steps=int(hp.WARMUP_RATIO * num_training_steps),
         num_training_steps=num_training_steps
     )
 
@@ -123,28 +123,28 @@ def train_two_head():
     for epoch in range(hp.EPOCH_NUM):
         model.train()
         total_loss = 0
-        
-        progress_bar = tqdm(enumerate(train_loader), total=len(train_loader), 
+
+        progress_bar = tqdm(enumerate(train_loader), total=len(train_loader),
                             desc=f"Epoch {epoch+1}", disable=not accelerator.is_local_main_process)
 
         for step, batch in progress_bar:
             with accelerator.accumulate(model):
                 outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'], head='b')
                 logits = outputs.logits.squeeze(-1)
-                
+
                 loss = criterion(logits, batch['labels'])
                 accelerator.backward(loss)
 
                 if accelerator.sync_gradients:
                     accelerator.clip_grad_norm_(model.parameters(), hp.MAX_GRAD_NORM)
-                
+
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad()
 
                 current_loss = loss.item()
                 total_loss += current_loss
-                
+
                 # Log Training to WandB
                 accelerator.log({
                     "train/loss": current_loss,
@@ -163,7 +163,7 @@ def train_two_head():
                 model.eval()
                 val_mae = 0
                 val_loss = 0
-                
+
                 if accelerator.is_main_process:
                     print(f"\nValidating at step {global_step}...")
 
@@ -171,19 +171,19 @@ def train_two_head():
                     for batch in val_loader:
                         outputs = model(input_ids=batch['input_ids'], attention_mask=batch['attention_mask'], head='b')
                         logits = outputs.logits.squeeze(-1)
-                        
+
                         loss = criterion(logits, batch['labels'])
-                        
+
                         # Gather results from all GPUs
                         logits, labels = accelerator.gather_for_metrics((logits, batch['labels']))
-                        
+
                         val_loss += loss.item()
                         pred_prob = torch.sigmoid(logits)
                         val_mae += torch.abs(pred_prob - labels).sum().item()
 
                 avg_val_mae = val_mae / len(val_dataset)
                 avg_val_loss = val_loss / len(val_loader)
-                
+
                 # Log Validation to WandB
                 accelerator.log({
                     "val/loss": avg_val_loss,
@@ -197,12 +197,12 @@ def train_two_head():
                     if avg_val_mae < best_val_mae:
                         best_val_mae = avg_val_mae
                         print(f"New best model! Saving checkpoint...")
-                        
+
                         # Unwrap and save
                         unwrapped_model = accelerator.unwrap_model(model)
                         unwrapped_model.bce_model.save_pretrained(output_dir)
                         tokenizer.save_pretrained(output_dir)
-                        
+
                         ckpt_path = os.path.join(hp.CHECKPOINT_DIR, f"two_head_best.pt")
                         _ensure_parent_dir(ckpt_path)
                         torch.save({

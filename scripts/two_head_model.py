@@ -12,12 +12,12 @@ from transformers import PreTrainedModel
 import sys
 from pathlib import Path
 
-# Add project root to sys.path to allow 'from Scripts...' imports
+# Add project root to sys.path to allow 'from scripts...' imports
 repo_root = Path(__file__).resolve().parent.parent
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from Scripts.lora_model import build_bce_model
+from scripts.lora_model import build_bce_model
 
 
 def compute_adaptive_n(p_hat: Union[float, torch.Tensor], lambd: float) -> Union[int, torch.Tensor]:
@@ -97,7 +97,7 @@ class TwoHeadModel(nn.Module):
     """
     Two-head model on top of a base transformer encoder/decoder output.
 
-    This follows the pattern from `Notebooks/adaptive_N_finetune.ipynb`:
+    This follows the pattern from `notebooks/adaptive_N_finetune.ipynb`:
       - base_model = AutoModel (no lm_head / no classifier head)
       - apply LoRA to attention projections
       - head_a: Linear(hidden_size -> 1) (binary)
@@ -159,7 +159,7 @@ class TwoHeadModel(nn.Module):
         if head in ("a", "both"):
             # Head A: binary verifier (expects Q+A)
             if is_peft:
-                # If we have a 'difficulty' adapter active, disable it for Head A 
+                # If we have a 'difficulty' adapter active, disable it for Head A
                 # so it uses the merged/base weights only.
                 with self.bce_model.disable_adapter():
                     logits_a = self.bce_model(input_ids=input_ids, attention_mask=attention_mask).logits
@@ -171,7 +171,7 @@ class TwoHeadModel(nn.Module):
             # Head B: difficulty regression (expects Q only)
             if is_peft:
                 self.bce_model.set_adapter("difficulty")
-            
+
             outputs = self.transformer(input_ids=input_ids, attention_mask=attention_mask)
             last_hidden = outputs.last_hidden_state
             pooled = self._pool(last_hidden, attention_mask)
@@ -224,10 +224,10 @@ def build_two_head_model(
         ckpt = torch.load(checkpoint_path, map_location=device)
         state_dict = ckpt["model_state_dict"] if isinstance(ckpt, dict) and "model_state_dict" in ckpt else ckpt
         bce_model.load_state_dict(state_dict, strict=False)
-        
+
         print("Merging Stage 1 LoRA into base weights (Sequential Path)...")
         bce_model = bce_model.merge_and_unload()
-        
+
         # 3. Add fresh LoRA for Stage 2
         print("Adding Stage 2 LoRA adapter ('difficulty')...")
         from peft import LoraConfig, get_peft_model
@@ -267,7 +267,7 @@ def main():
         - question-level true correct rate = (#label==1) / (#candidates)
 
     Run (repo root):
-        python Scripts/two_head_model.py --checkpoint checkpoints/bce_best_model.pt --n_questions 5 --k_answers 3
+        python scripts/two_head_model.py --checkpoint checkpoints/bce_best_model.pt --n_questions 5 --k_answers 3
     """
     import argparse
     import json
@@ -343,11 +343,11 @@ def main():
         with torch.no_grad():
             out_b = two_head(input_ids=q_enc["input_ids"], attention_mask=q_enc.get("attention_mask"), head="b")
             prob_b = float(torch.sigmoid(out_b.logits).squeeze().cpu().item())
-        
+
         # Compute N* with a few sample lambda values
         n_star_01 = compute_adaptive_n(prob_b, lambd=0.01)
         n_star_05 = compute_adaptive_n(prob_b, lambd=0.05)
-        
+
         print(f"  -> HeadB Predicted Correct Rate: {prob_b:.4f}")
         print(f"  -> Adaptive N*: lambda=0.01 -> N={n_star_01} | lambda=0.05 -> N={n_star_05}")
 
