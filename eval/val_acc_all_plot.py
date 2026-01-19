@@ -5,7 +5,7 @@ import os
 import numpy as np
 
 # Read the CSV file
-filename = "data/val_pauc_bce_sopas_results.csv"
+filename = "data/val_acc_all_models_results.csv"
 df = pd.read_csv(filename)
 
 # Use a clean style without grid by default
@@ -17,8 +17,11 @@ plt.rcParams.update({"font.size": 12, "font.family": "sans-serif"})
 # Define the columns for X and Y axes
 x_col = "Step"
 y_cols = [
-    "sopas_fpr0.3 - val/pauc",
-    "bce - val/pauc"
+    "sopas_fpr0.3 - val/acc",
+    "sopas_fpr0.5 - val/acc",
+    "sotas_tpr0.6_fpr0.4 - val/acc",
+    "sotas_tpr0.5_fpr0.5 - val/acc",
+    "bce - val/acc",
 ]
 
 max_step = df[x_col].max()
@@ -27,15 +30,18 @@ max_bce_epoch = max_step / 1730
 plt.figure(figsize=(10, 8), dpi=150)
 
 # Define a color palette
-colors = ["#1f77b4", "#ff7f0e"]
+colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
 
 # Iterate through the columns and plot each one
 for i, y_col in enumerate(y_cols):
     # Determine the label and the specific step-per-epoch ratio
     if "sopas" in y_col:
-        label_name = "SOPAs"
+        label_name = "SOPAs" + "_" + y_col.split(" - ")[0].split("_")[-1]
         steps_per_epoch = 1880 # SOPAs conversion
-    elif "bce" in y_col:
+    if "sotas" in y_col:
+        label_name = "SOTAs" + "_" + "_".join(y_col.split(" - ")[0].split("_")[-2:])
+        steps_per_epoch = 1880 # SOTAs conversion
+    if "bce" in y_col:
         label_name = "BCE"
         steps_per_epoch = 1730 # BCE conversion
 
@@ -48,8 +54,8 @@ for i, y_col in enumerate(y_cols):
 
 # Set axis labels and title
 plt.xlabel("Epochs", fontsize=14)
-plt.ylabel("pAUC", fontsize=14)
-plt.title("Validation pAUC (FPR $\leq$ 0.3)", fontsize=16)
+plt.ylabel("Accuracy", fontsize=14)
+plt.title("Validation Accuracy", fontsize=16)
 
 ticks = np.arange(0, int(max_bce_epoch) + 1)
 plt.xticks(ticks)
@@ -68,7 +74,7 @@ sns.despine()
 plt.tight_layout()
 
 output_dir = "figures"
-output_filename = "val_pauc_sopas_bce_comparison.png"
+output_filename = "val_acc_all_models_comparison.png"
 output_path = os.path.join(output_dir, output_filename)
 os.makedirs(output_dir, exist_ok=True)
 print(f"Saving figure to {output_path}...")

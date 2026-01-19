@@ -17,8 +17,8 @@ plt.rcParams.update({"font.size": 12, "font.family": "sans-serif"})
 # Define the columns for X and Y axes
 x_col = "Step"
 y_cols = [
-    "pauc_20260113_233040_full - val/acc",
-    "bce_20260113_233040_full - val/acc"
+    "sopas_fpr0.3 - val/acc",
+    "bce - val/acc"
 ]
 
 max_step = df[x_col].max()
@@ -32,10 +32,10 @@ colors = ["#1f77b4", "#ff7f0e"]
 # Iterate through the columns and plot each one
 for i, y_col in enumerate(y_cols):
     # Determine the label and the specific step-per-epoch ratio
-    if "pauc" in y_col:
-        label_name = "SOPA"
-        steps_per_epoch = 1880 # SOPA conversion
-    if "bce" in y_col:
+    if "sopas" in y_col:
+        label_name = "SOPAs"
+        steps_per_epoch = 1880 # SOPAs conversion
+    elif "bce" in y_col:
         label_name = "BCE"
         steps_per_epoch = 1730 # BCE conversion
 
