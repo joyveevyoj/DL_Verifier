@@ -518,7 +518,7 @@ def main():
         verifier = BinaryVerifier(model=model, tokenizer=tokenizer, max_length=vcfg.MAX_LENGTH)
     else:  # two_head
         vcfg = config.TWO_HEAD_TRAIN
-        ckpt_path = repo_root / config.TWO_HEAD_TRAIN.CHECKPOINT_DIR / "two_head_best.pt"
+        ckpt_path = repo_root / config.TWO_HEAD_TRAIN.CHECKPOINT_DIR / "two_head_best_pauc.pt"
         model = build_two_head_model(
             model_name=config.MODEL_NAME,
             device=config.DEVICE,

@@ -55,6 +55,17 @@ unzip data/verifier_dataset_train.zip -d data/
 ```
 Ensure `data/verifier_dataset_train.json` and `data/verifier_dataset_test.json` are present.
 
+### 0.5. Download Pre-trained Checkpoints (Optional)
+If you wish to skip training and go straight to evaluation, you can download pre-trained checkpoints from the following links:
+
+1.  **Stage 1 Checkpoints (Correctness Prediction)**:
+    - Download: [Polybox Link](https://polybox.ethz.ch/index.php/s/Dz2ctjPk4jpHF5n)
+    - Placement: Extract files into the `./checkpoints` folder.
+
+2.  **Stage 2 Checkpoints (Difficulty Prediction)**:
+    - Download: [Polybox Link](https://polybox.ethz.ch/index.php/s/D49PxWWCLdiBt9F)
+    - Placement: Extract files into the `./checkpoints/two_head` folder.
+
 ### 1. First Stage Training: Correctness Prediction (ROC/pAUC)
 To train the binary classification verifier (Head A) optimizing for the AUC-ROC or pAUC metric:
 ```bash
@@ -79,7 +90,7 @@ python Scripts/difficulty_prediction_train.py
 To evaluate and compare different verification strategies (Best-of-N, Rejection Sampling, Adaptive N):
 ```bash
 # Example running comparison with the two-head model
-python Scripts/Verification_strategy.py --verifier two_head --n 10 --best_n 10 --threshold 0.5 --lambd 0.05
+python Scripts/Verification_strategy.py --verifier two_head --n 50 --best_n 32 --threshold 0.5 --lambd 0.05
 ```
 **Arguments:**
 - `--verifier`: Choose between `bce`, `pauc`, or `two_head`.
