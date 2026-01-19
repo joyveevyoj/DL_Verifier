@@ -17,23 +17,23 @@ plt.rcParams.update({"font.size": 12, "font.family": "sans-serif"})
 # Define the columns for X and Y axes
 x_col = "Step"
 y_cols = [
+    "bce - val/pauc",
     "sopas_fpr0.3 - val/pauc",
-    "bce - val/pauc"
 ]
 
 max_step = df[x_col].max()
 max_bce_epoch = max_step / 1730
 # Create the figure with high DPI
-plt.figure(figsize=(10, 8), dpi=150)
+plt.figure(figsize=(5, 4), dpi=300)
 
 # Define a color palette
-colors = ["#1f77b4", "#ff7f0e"]
+colors = ["#ff7f0e", "#1f77b4"]
 
 # Iterate through the columns and plot each one
 for i, y_col in enumerate(y_cols):
     # Determine the label and the specific step-per-epoch ratio
     if "sopas" in y_col:
-        label_name = "SOPAs"
+        label_name = "SOPA-s"
         steps_per_epoch = 1880 # SOPAs conversion
     elif "bce" in y_col:
         label_name = "BCE"
@@ -44,19 +44,20 @@ for i, y_col in enumerate(y_cols):
     x_data_epochs = df[x_col] / steps_per_epoch
 
     # Plot the line using the calculated epochs as x-axis
-    plt.plot(x_data_epochs, df[y_col], label=label_name, linewidth=2, color=colors[i % len(colors)])
+    plt.plot(x_data_epochs, df[y_col], label=label_name, linewidth=3, color=colors[i % len(colors)])
 
 # Set axis labels and title
-plt.xlabel("Epochs", fontsize=14)
-plt.ylabel("pAUC", fontsize=14)
-plt.title("Validation pAUC (FPR $\leq$ 0.3)", fontsize=16)
+plt.xlabel("Epochs", fontsize=16)
+plt.ylabel("Accuracy", fontsize=16)
+plt.title("Validation One-way pAUC (FPR $\leq$ 0.3)", fontsize=18)
 
 ticks = np.arange(0, int(max_bce_epoch) + 1)
 plt.xticks(ticks)
 plt.xlim(0, max_bce_epoch * 1.02)
+plt.tick_params(axis='both', which='major', labelsize=14)
 
 # Configure the legend
-plt.legend(frameon=True, fontsize=12, loc="lower right")
+plt.legend(frameon=True, fontsize=14, loc="lower right")
 
 # Explicitly disable the grid
 plt.grid(False)
@@ -68,7 +69,7 @@ sns.despine()
 plt.tight_layout()
 
 output_dir = "figures"
-output_filename = "val_pauc_sopas_bce_comparison.png"
+output_filename = "val_pauc_sopas_bce_comparison.pdf"
 output_path = os.path.join(output_dir, output_filename)
 os.makedirs(output_dir, exist_ok=True)
 print(f"Saving figure to {output_path}...")

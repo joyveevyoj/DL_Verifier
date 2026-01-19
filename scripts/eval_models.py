@@ -14,54 +14,38 @@ from lora_model import build_bce_model
 import warnings
 import logging
 from transformers import logging as hf_logging
+
+# --- Suppress Warnings ---
 warnings.filterwarnings("ignore")
 hf_logging.set_verbosity_error()
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
-# --- Configuration Section (Updated based on your provided config) ---
+# --- Configuration Section ---
 class EvalConfig:
-    # Base model name
     MODEL_NAME = "Qwen/Qwen3-0.6B"
-
-    # Updated Max Length and Batch Size
     MAX_LENGTH = 256
     BATCH_SIZE = 32
-
-    # Updated LoRA parameters
     LORA_R = 8
     LORA_ALPHA = 16
     LORA_DROPOUT = 0.1
-
-    # Path to the test dataset (Assuming relative path is same as before)
     TEST_DATA_PATH = "data/verifier_dataset_test.json"
-
-    # Device configuration
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+# --- Metrics Definition ---
+EVAL_METRICS = {
+    "FPR<=0.3": {"max_fpr": 0.3},
+    "FPR<=0.5": {"max_fpr": 0.5},
+    "TPR>=0.6|FPR<=0.4": {"min_tpr": 0.6, "max_fpr": 0.4},
+    "TPR>=0.5|FPR<=0.5": {"min_tpr": 0.5, "max_fpr": 0.5}
+}
+
 # --- Model Registry ---
-# Format: "Model ID": {"path": "Checkpoint Path", "pauc_params": {pAUC calculation params}}
-# This defines which models to evaluate and their specific target metrics
 MODEL_REGISTRY = {
-    "bce": {
-        "path": "checkpoints/bce/bce_best_model.pt",
-        "pauc_params": {"max_fpr": 0.3} # BCE default is FPR<=0.3
-    },
-    "sopas_fpr0.3": {
-        "path": "checkpoints/sopas_fpr0.3/pauc_best_model.pt",
-        "pauc_params": {"max_fpr": 0.3}
-    },
-    "sopas_fpr0.5": {
-        "path": "checkpoints/sopas_fpr0.5/pauc_best_model.pt",
-        "pauc_params": {"max_fpr": 0.5}
-    },
-    "sotas_tpr0.6_fpr0.4": {
-        "path": "checkpoints/sotas_tpr0.6_fpr0.4/pauc_best_model.pt",
-        "pauc_params": {"min_tpr": 0.6, "max_fpr": 0.4}
-    },
-    "sotas_tpr0.5_fpr0.5": {
-        "path": "checkpoints/sotas_tpr0.5_fpr0.5/pauc_best_model.pt",
-        "pauc_params": {"min_tpr": 0.5, "max_fpr": 0.5}
-    }
+    "BCE (Baseline)": "checkpoints/bce/bce_best_model.pt",
+    "SOPA (FPR 0.3)": "checkpoints/sopas_fpr0.3/pauc_best_model.pt",
+    "SOPA (FPR 0.5)": "checkpoints/sopas_fpr0.5/pauc_best_model.pt",
+    "SOTA (TPR 0.6)": "checkpoints/sotas_tpr0.6_fpr0.4/pauc_best_model.pt",
+    "SOTA (TPR 0.5)": "checkpoints/sotas_tpr0.5_fpr0.5/pauc_best_model.pt"
 }
 
 def load_data(file_path):
@@ -71,26 +55,20 @@ def load_data(file_path):
     print(f"Loaded {len(data)} samples.")
     return data
 
-def evaluate_model(model_name, config_entry, test_loader, tokenizer, base_config):
+def evaluate_model(model_name, ckpt_path, test_loader, tokenizer, base_config):
     """
-    Load a single model and perform inference evaluation on the test set.
+    Load a model and calculate all defined metrics.
     """
-    ckpt_path = config_entry["path"]
-    pauc_params = config_entry["pauc_params"]
-
     print(f"\n{'='*20}")
     print(f"Evaluating Model: {model_name}")
     print(f"Checkpoint: {ckpt_path}")
-    print(f"Target Metrics: {pauc_params}")
     print(f"{'='*20}")
 
     if not os.path.exists(ckpt_path):
         print(f"Error: Checkpoint not found at {ckpt_path}. Skipping.")
         return None
 
-    # 1. Build model structure
-    # Utilizing the build function from lora_model.py
-    # Note: We use the updated LoRA params (R=8, Alpha=16) here
+    # 1. Build model
     model = build_bce_model(
         model_name=base_config.MODEL_NAME,
         lora_r=base_config.LORA_R,
@@ -104,7 +82,6 @@ def evaluate_model(model_name, config_entry, test_loader, tokenizer, base_config
     print("Loading weights...")
     try:
         checkpoint = torch.load(ckpt_path, map_location=base_config.DEVICE)
-        # Handle potential DDP wrapper (if 'module.' prefix exists) or load directly
         state_dict = checkpoint['model_state_dict'] if 'model_state_dict' in checkpoint else checkpoint
         model.load_state_dict(state_dict, strict=True)
     except Exception as e:
@@ -114,7 +91,7 @@ def evaluate_model(model_name, config_entry, test_loader, tokenizer, base_config
     model.to(base_config.DEVICE)
     model.eval()
 
-    # 3. Inference loop
+    # 3. Inference
     all_preds = []
     all_labels = []
 
@@ -135,35 +112,29 @@ def evaluate_model(model_name, config_entry, test_loader, tokenizer, base_config
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)
 
-    # 4. Calculate metrics
-    # Accuracy
+    # 4. Calculate All Metrics
     binary_preds = (all_preds > 0.5).astype(int)
     accuracy = (binary_preds == all_labels).mean()
 
-    # pAUC (based on specific parameters)
-    try:
-        score_pauc = pauc_roc_score(all_labels, all_preds, **pauc_params)
-    except Exception as e:
-        print(f"Warning: pAUC calculation failed ({e}). Setting to 0.")
-        score_pauc = 0.0
-
-    # Calculate a standard pAUC (FPR<=0.3) for reference/comparison
-    try:
-        std_pauc = pauc_roc_score(all_labels, all_preds, max_fpr=0.3)
-    except:
-        std_pauc = 0.0
+    metrics_results = {}
+    for metric_name, params in EVAL_METRICS.items():
+        try:
+            score = pauc_roc_score(all_labels, all_preds, **params)
+        except Exception as e:
+            score = 0.0
+        metrics_results[metric_name] = score
 
     result = {
         "model": model_name,
         "acc": accuracy,
-        "target_pauc": score_pauc,
-        "target_params": str(pauc_params),
-        "std_pauc_0.3": std_pauc
+        "metrics": metrics_results
     }
 
-    print(f"Result for {model_name}: Acc={accuracy:.2%}, Target pAUC={score_pauc:.4f}")
+    # Print immediate result summary (5 decimal places)
+    print(f"Result for {model_name}: Acc={accuracy:.5f}")
+    for k, v in metrics_results.items():
+        print(f"  - {k}: {v:.5f}")
 
-    # Clear memory
     del model
     torch.cuda.empty_cache()
 
@@ -191,24 +162,43 @@ def main():
         collate_fn=collator
     )
 
-    # 2. Evaluate all models sequentially
+    # 2. Evaluate all models
     results = []
-    for model_name, model_conf in MODEL_REGISTRY.items():
-        res = evaluate_model(model_name, model_conf, test_loader, tokenizer, config)
+    for model_name, ckpt_path in MODEL_REGISTRY.items():
+        res = evaluate_model(model_name, ckpt_path, test_loader, tokenizer, config)
         if res:
             results.append(res)
 
     # 3. Summary Report
-    print("\n\n" + "="*60)
-    print(f"{'FINAL EVALUATION REPORT':^60}")
-    print("="*60)
-    # Print Table Header
-    print(f"{'Model Name':<25} | {'Acc':<8} | {'Target pAUC':<12} | {'Params':<25}")
-    print("-" * 75)
+    print("\n\n" + "="*120)
+    print(f"{'FINAL EVALUATION REPORT':^120}")
+    print("="*120)
 
+    # Define column widths
+    name_w = 25
+    acc_w = 10
+    metric_w = 18
+
+    # Build Header
+    header = f"{'Model Name':<{name_w}} | {'Acc':<{acc_w}}"
+    metric_keys = list(EVAL_METRICS.keys())
+    for k in metric_keys:
+        header += f" | {k:<{metric_w}}"
+
+    print(header)
+    print("-" * len(header))
+
+    # Print Rows
     for res in results:
-        print(f"{res['model']:<25} | {res['acc']:.2%}   | {res['target_pauc']:.4f}       | {res['target_params']:<25}")
-    print("="*60)
+        # Changed format from .2% to .5f
+        row = f"{res['model']:<{name_w}} | {res['acc']:.5f}   "
+        for k in metric_keys:
+            val = res['metrics'].get(k, 0.0)
+            # Changed format from .4f to .5f
+            row += f" | {val:.5f}".ljust(metric_w + 3)
+        print(row)
+
+    print("="*120)
 
 if __name__ == "__main__":
     main()
