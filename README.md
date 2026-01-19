@@ -4,11 +4,11 @@ Test-time scaling experiment for LLM verification using Qwen3-0.6B on GSM8K data
 
 ## Project Structure (Scripts)
 
-The core logic of this project is located in the `Scripts/` directory:
+The core logic of this project is located in the `scripts/` directory:
 
 - `correctness_prediction_train.py`: Main entry point for Stage 1 training (BCE/pAUC).
 - `difficulty_prediction_train.py`: Main entry point for Stage 2 training (Difficulty Prediction).
-- `Verification_strategy.py`: Evaluation script for comparing verification strategies (Best-of-N, Adaptive N, etc.).
+- `verification_strategy.py`: Evaluation script for comparing verification strategies (Best-of-N, Adaptive N, etc.).
 - `two_head_model.py`: Model architecture for the two-head verifier (Classification + Difficulty).
 - `lora_model.py`: Model building logic for Stage 1 verifiers using LoRA adapters.
 - `train_bce.py`: Implementation of the Binary Cross-Entropy training loop.
@@ -69,7 +69,7 @@ If you wish to skip training and go straight to evaluation, you can download pre
 ### 1. First Stage Training: Correctness Prediction (ROC/pAUC)
 To train the binary classification verifier (Head A) optimizing for the AUC-ROC or pAUC metric:
 ```bash
-python Scripts/correctness_prediction_train.py --mode bce
+python scripts/correctness_prediction_train.py --mode bce
 ```
 **Arguments:**
 - `--mode`: Which training flow to run. Options:
@@ -80,7 +80,7 @@ python Scripts/correctness_prediction_train.py --mode bce
 ### 2. Second Stage Training: Difficulty Prediction
 Stage 2 training for the difficulty prediction head (Head B) using the pre-trained verifier (Head A). This script uses settings from the `TWO_HEAD_TRAIN` section in `config.yaml`.
 ```bash
-python Scripts/difficulty_prediction_train.py
+python scripts/difficulty_prediction_train.py
 ```
 **Notes:**
 - It loads a pre-trained BCE model (specified by `START_FROM_CHECKPOINT` in `config.yaml`) and trains a second head for difficulty prediction.
@@ -90,7 +90,7 @@ python Scripts/difficulty_prediction_train.py
 To evaluate and compare different verification strategies (Best-of-N, Rejection Sampling, Adaptive N):
 ```bash
 # Example running comparison with the two-head model
-python Scripts/Verification_strategy.py --verifier two_head --n 50 --best_n 32 --threshold 0.5 --lambd 0.05
+python scripts/verification_strategy.py --verifier two_head --n 50 --best_n 32 --threshold 0.5 --lambd 0.05
 ```
 **Arguments:**
 - `--verifier`: Choose between `bce`, `pauc`, or `two_head`.
@@ -98,4 +98,3 @@ python Scripts/Verification_strategy.py --verifier two_head --n 50 --best_n 32 -
 - `--best_n`: The fixed $N$ budget for Best-of-N and Rejection Sampling.
 - `--threshold`: The confidence threshold (0-1) for Rejection Sampling.
 - `--lambd`: The cost parameter $\lambda$ for Adaptive N (lower $\lambda$ = higher $N^*$).
-

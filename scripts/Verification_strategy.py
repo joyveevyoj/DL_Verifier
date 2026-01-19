@@ -9,14 +9,14 @@ from transformers import PreTrainedModel, PreTrainedTokenizerBase
 import sys
 from pathlib import Path
 
-# Add project root to sys.path to allow 'from Scripts...' imports
+# Add project root to sys.path to allow 'from scripts...' imports
 repo_root = Path(__file__).resolve().parent.parent
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from Scripts.two_head_model import TwoHeadModel, build_two_head_model, compute_adaptive_n
-from Scripts.config_loader import load_config
-from Scripts.lora_model import build_bce_model
+from scripts.two_head_model import TwoHeadModel, build_two_head_model, compute_adaptive_n
+from scripts.config_loader import load_config
+from scripts.lora_model import build_bce_model
 
 
 @dataclass
@@ -432,10 +432,10 @@ def main():
     How to run (from repo root):
 
     - pAUC verifier + test set (10 examples), rejection threshold = 0.7 (sigmoid prob):
-        python Scripts/Verification_strategy.py --verifier pauc --n 10 --threshold 0.7
+        python scripts/verification_strategy.py --verifier pauc --n 10 --threshold 0.7
 
     - BCE verifier + test set (10 examples), rejection threshold = 0.5 (sigmoid prob):
-        python Scripts/Verification_strategy.py --verifier bce --n 10 --threshold 0.5
+        python scripts/verification_strategy.py --verifier bce --n 10 --threshold 0.5
 
     Args overview:
       --verifier {pauc,bce} : which checkpoint/config block to load
@@ -564,7 +564,7 @@ def main():
         if not answers:
             continue
 
-        # Shuffle candidates 
+        # Shuffle candidates
         combined = list(zip(answers, labels))
         random.shuffle(combined)
         answers, labels = zip(*combined)

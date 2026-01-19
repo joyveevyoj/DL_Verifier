@@ -17,12 +17,12 @@ def _resolve_path(path):
     # Try a few common locations so this works regardless of CWD:
     # 1) As given (relative to current working directory)
     # 2) Repo root
-    # 3) Dir: Scripts/ (where config.yaml currently lives)
+    # 3) Dir: scripts/ (where config.yaml currently lives)
     repo_root = Path(__file__).resolve().parent.parent
     candidates = [
         Path.cwd() / p,
         repo_root / p,
-        repo_root / "Scripts" / p,
+        repo_root / "scripts" / p,
     ]
     for candidate in candidates:
         if candidate.exists():
